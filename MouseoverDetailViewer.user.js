@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouseover Detail Viewer
 // @namespace    https://github.com/hanzoh-games/MouseoverDetailViewer
-// @version      1.0.0
+// @version      1.0.1
 // @description  Path of Exile trade: hover a line that only names a passive, keystone or granted skill to see its effects. / Path of Exile のトレードの画面で、パッシブ・キーストーン・アイテムが付与するスキルの名前の行にマウスを重ねると、効果を表示します。
 // @author       hanzoh-games
 // @license      MIT
@@ -421,6 +421,7 @@
   }
   const nodeRank =(isKeystone, isNotable, isAscendancy) => (isKeystone ? 3 : isNotable ? 2 : 1) + (isAscendancy ? 0 : 0.5);
   // The Japanese reminder texts start with the English word ("(Stun Threshold: スタン閾値は…)"); keep only the Japanese
+  const unique = (list) => [...new Set(list)];
   const cleanJaReminder = (s) => s.replace(/^\(\s*[A-Za-z][A-Za-z0-9 '\-]*:\s*/, '(');
 
   // Item lines that name a keystone ("Iron Reflexes", "You have Shepherd of Souls if at least 4 Corrupted Items are
@@ -449,7 +450,7 @@
         if (!entry && node) {
           // a newer keystone missing from RePoE's Japanese tree: turn the official English text into Japanese
           const r = englishLinesToJapanese(node.stats, toJapanese);
-          entry = { n: jline, l: r.lines, r: r.reminders.map(cleanJaReminder), f: r.failed ? 1 : 0 };
+          entry = { n: jline, l: r.lines, r: unique(r.reminders.map(cleanJaReminder)), f: r.failed ? 1 : 0 };
         }
         out.ja[jline] = entry || fromReminder(jline, jv.reminder_text, true);
       });
@@ -583,7 +584,8 @@
       if (r.failed) clusterJapaneseMissing++;
       addEntry(ja, jaRank, x.name, { n: x.name, l: r.lines, r: r.reminders, f: r.failed ? 1 : 0 }, 2);
     }
-    for (const entry of Object.values(ja)) entry.r = entry.r.map(cleanJaReminder);
+    // the game shows each reminder once, even when several lines name the same word ("Arcane Surge")
+    for (const entry of Object.values(ja)) entry.r = unique(entry.r.map(cleanJaReminder));
     const lines = keystoneLines(f.enStat, f.jaStat, gggByName, jaByHash, en, toJapanese);
 
     return {
