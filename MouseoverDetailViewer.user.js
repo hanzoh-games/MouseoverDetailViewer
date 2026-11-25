@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouseover Detail Viewer
 // @namespace    https://github.com/hanzoh-games/MouseoverDetailViewer
-// @version      1.0.2
+// @version      1.0.3
 // @description  Path of Exile trade: hover a line that only names a passive, keystone or granted skill to see its effects. / Path of Exile のトレードの画面で、パッシブ・キーストーン・アイテムが付与するスキルの名前の行にマウスを重ねると、効果を表示します。
 // @author       hanzoh-games
 // @license      MIT
@@ -105,6 +105,9 @@
       notFound: 'このパッシブの効果は、データの中に見つかりませんでした。',
       skillTitle: (n, l) => `${n}(レベル ${l})`,
       skillNotFound: 'このスキルの効果は、データの中に見つかりませんでした。',
+      // the line of a support gem on an item: (level) (support's name)
+      // ("ソケットされたジェムは…", "装備中の鎧によるスキルは…", "パッシブツリーによって付与されたスキルは…")
+      supportLine: /^.+?は\s*レベル\s*(\d+)\s*(.+?)\s*(?:によって|により|に)\s*サポートされる$/,
     },
     en: {
       button: 'Detail data ★',
@@ -122,6 +125,8 @@
       notFound: 'The effects of this passive were not found in the data.',
       skillTitle: (n, l) => `${n} (Level ${l})`,
       skillNotFound: 'The effects of this skill were not found in the data.',
+      // ("Socketed Gems are…", "Skills from Equipped Body Armour are…", "Skills granted by your Passive Skill Tree are…")
+      supportLine: /^.+? (?:are|is) Supported by Level (\d+) (.+?)$/i,
     },
   };
 
@@ -506,6 +511,25 @@
         if (id) used.add(id);
       }
     }
+    // Support gems on items ("ソケットされたジェムはレベル20 投射物回帰サポートによってサポートされる",
+    // "Socketed Gems are Supported by Level 20 Returning Projectiles"). Most of these lines are not in the
+    // translations, so they are matched by TEXT.supportLine and the support's name. The English line leaves
+    // out the word "Support", so the name is stored with and without it.
+    const supports = {};   // name -> support gem id
+    const supportName = (g) => stripMarkup(String(g.display_name || (g.base_item && g.base_item.display_name) || '')).trim();
+    for (const [id, g] of Object.entries(gems)) {
+      if (!g || !g.is_support || !g.support_gem || !g.per_level) continue;
+      const n = supportName(g);
+      if (!n) continue;
+      for (const k of unique([n, n.replace(/\s*(Support|サポート)$/i, '')])) {
+        if (!k) continue;
+        // the same name can belong to several ids; prefer the one that is a real gem item
+        const old = supports[k] && gems[supports[k]];
+        if (!old || (!old.base_item && g.base_item)) supports[k] = id;
+      }
+    }
+    for (const id of Object.values(supports)) used.add(id);
+
     const clean = (s) => stripMarkup(String(s)).split('\n').map((x) => x.trim()).filter(Boolean);
     const texts = (o) => [].concat(...Object.values((o && o.stat_text) || {}).map(clean));
     const skills = {};
@@ -516,14 +540,16 @@
         const t = texts(p);
         if (t.length) lv[level] = t;
       }
+      const a = g.active_skill;
+      const desc = a ? a.description : g.support_gem && g.support_gem.support_text;
       skills[id] = {
-        n: stripMarkup(g.active_skill.display_name),
-        d: g.active_skill.description ? clean(g.active_skill.description) : [],
+        n: a ? stripMarkup(a.display_name) : supportName(g),
+        d: desc ? clean(desc) : [],
         s: texts(g.static),
         lv,
       };
     }
-    return { templates, skills };
+    return { templates, skills, supports };
   }
 
   function convertPoe1(f, versions) {
@@ -701,17 +727,19 @@
   let matchers = [];       // [{ rx }]
   let lineTable = {};      // whole line text -> entry (keystone lines)
   let skillTable = {};     // skill id -> skill (skills granted by items)
+  let supportTable = {};   // support gem name -> skill id (support gems on items)
   const cache = new Map(); // line text -> entry | null
 
   function loadTable() {
     cache.clear();
     if (typeof hidePopup === 'function' && popup) hidePopup();   // the shown text may be from before the update
     const data = GM_getValue(KEY_DATA, null);
-    if (!data) { table = null; lineTable = {}; skillTable = {}; matchers = []; return; }
+    if (!data) { table = null; lineTable = {}; skillTable = {}; supportTable = {}; matchers = []; return; }
     table = data.names[LANG] || {};
     lineTable = (data.lines && data.lines[LANG]) || {};
     const sk = (data.skills && data.skills[LANG]) || { templates: [], skills: {} };
     skillTable = sk.skills;
+    supportTable = sk.supports || {};
     // strict forms first, and longer forms first ("Allocates {0} if you have ... Forbidden Flesh" before "Allocates {0}")
     const list = (data.templates[LANG] || []).map((x) => ({ t: x.t, loose: x.loose, skill: null }))
       .concat(sk.templates.map((x) => ({ t: x.t, loose: false, skill: x.id })))
@@ -747,6 +775,13 @@
     if (cache.has(text)) return cache.get(text);
     let result = lineTable[text] || null;
     if (result) { cache.set(text, result); return result; }
+    const sm = T.supportLine.exec(normalize(text));
+    if (sm) {
+      const id = supportTable[normalize(sm[2])];
+      result = (id && skillEntry(id, Number(sm[1]))) || { n: text, l: [], r: [], missing: true, skillMissing: true };
+      cache.set(text, result);
+      return result;
+    }
     for (const { rx, loose, skill } of matchers) {
       const m = rx.exec(text);
       if (!m) continue;
@@ -882,7 +917,7 @@
         return;
       }
       if (!table) {
-        if (!/Passive Skill|Allocates|Grants Level|Trigger|パッシブスキルを1個追加|を割り当てる|スキルを付与|をトリガー/i.test(rowText(row))) { hidePopup(); return; }
+        if (!/Passive Skill|Allocates|Grants Level|Trigger|Supported by Level|パッシブスキルを1個追加|を割り当てる|スキルを付与|をトリガー|サポートされる/i.test(rowText(row))) { hidePopup(); return; }
         entry = null;
       } else {
         entry = lookup(rowText(row));

@@ -16,6 +16,7 @@ Mouseover Detail Viewerはその拡張機能の土台を利用して動作する
 ・「トリックショット を割り当てる」などのアノイントの行、禁じられた炎・禁じられた肉体の行
 ・「アイアンリフレックス」「コラプテッドソウル」などのキーストーンの名前の行
 ・「装備するとレベル20冷気のイージスをトリガーする」などの、アイテムが付与するスキルの行(行に書かれたレベルの数値で表示します)
+・「ソケットされたジェムはレベル20 投射物回帰サポートによってサポートされる」などの、サポートジェムと同じ効果の行(行に書かれたレベルの数値で表示します)
 
 対応する画面: POE1 の日本語・英語の画面、POE2 の英語の画面(Chrome・Edge)。
 
@@ -91,6 +92,7 @@ This tool needs a browser extension, Tampermonkey. Mouseover Detail Viewer is a 
 ・"Allocates ..." lines (anointments, Forbidden Flame / Flesh)
 ・Keystone lines such as "Iron Reflexes" or "Corrupted Soul"
 ・Skills granted by items, such as "Triggers Level 20 Cold Aegis when Equipped" (values for the level on the line)
+・Support gem lines such as "Socketed Gems are Supported by Level 20 Returning Projectiles" (values for the level on the line)
 
 Supported: POE1 trade in Japanese and English, POE2 trade in English (Chrome, Edge).
 
