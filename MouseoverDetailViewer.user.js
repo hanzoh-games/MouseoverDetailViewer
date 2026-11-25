@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Mouseover Detail Viewer
 // @namespace    https://github.com/hanzoh-games/MouseoverDetailViewer
-// @version      1.0.1
+// @version      1.0.2
 // @description  Path of Exile trade: hover a line that only names a passive, keystone or granted skill to see its effects. / Path of Exile のトレードの画面で、パッシブ・キーストーン・アイテムが付与するスキルの名前の行にマウスを重ねると、効果を表示します。
 // @author       hanzoh-games
 // @license      MIT
@@ -134,6 +134,8 @@
   const T = TEXT[LANG];
   const KEY_DATA = 'data_' + GAME;          // converted table
   const KEY_CHECK = 'check_' + GAME;        // { at: time of last check, latest: versions found }
+  // the script's own Version; stored with the data, so data made by an older script can be rebuilt
+  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '';
 
   // ---------------------------------------------------------------------------
   // Download helpers
@@ -655,6 +657,7 @@
         });
         gems = null;
       }
+      data.scriptVersion = SCRIPT_VERSION;
       GM_setValue(KEY_DATA, data);
       GM_setValue(KEY_CHECK, { at: Date.now(), latest: versions });
       loadTable();
@@ -673,6 +676,8 @@
     if (!data) { showButton(T.buttonFirst, false); return; }
     // the skills are downloaded for one language at a time
     if (GAME === 'poe1' && !(data.skills && data.skills[LANG])) { showButton(T.buttonFirst, false); return; }
+    // the data was made by another Version of this script: the way of making it may have changed
+    if (SCRIPT_VERSION && data.scriptVersion !== SCRIPT_VERSION) { showButton(T.buttonNew, false); return; }
     const check = GM_getValue(KEY_CHECK, null);
     const due = !check || Date.now() - check.at > CONFIG.checkIntervalHours * 3600 * 1000;
     let latest = check && check.latest;
@@ -816,7 +821,7 @@
     if (entry.missing) popup.appendChild(el('mpv-note', entry.skillMissing ? T.skillNotFound : T.notFound));
     for (const d of entry.d || []) popup.appendChild(el('mpv-desc', d));
     for (const l of entry.l) popup.appendChild(el('mpv-line', l));
-    for (const r of entry.r || []) popup.appendChild(el('mpv-rem', r));
+    for (const r of unique(entry.r || [])) popup.appendChild(el('mpv-rem', r));   // also for data made before 1.0.1
     if (entry.f && T.noJapanese) popup.appendChild(el('mpv-note', T.noJapanese));
   }
 
