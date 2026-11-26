@@ -1,12 +1,11 @@
 // ==UserScript==
 // @name         Mouseover Detail Viewer
 // @namespace    https://github.com/hanzoh-games/MouseoverDetailViewer
-// @version      1.0.3
-// @description  Path of Exile trade: hover a line that only names a passive, keystone or granted skill to see its effects. / Path of Exile のトレードの画面で、パッシブ・キーストーン・アイテムが付与するスキルの名前の行にマウスを重ねると、効果を表示します。
+// @version      1.2.0
+// @description  Path of Exile trade: hover a line that only names a passive, keystone or granted skill to see its effects, and open POEDB with one click. / Path of Exile のトレードの画面で、パッシブ・キーストーン・アイテムが付与するスキルの名前の行にマウスを重ねると、効果を表示します。POEDB もボタン1つで開けます。
 // @author       hanzoh-games
 // @license      MIT
-// @match        https://www.pathofexile.com/trade*
-// @match        https://jp.pathofexile.com/trade*
+// @match        https://*.pathofexile.com/trade*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -52,6 +51,89 @@
     maxLinesPerStat: 8,            // longest stat text (in lines) when turning English text into Japanese
     looseTemplateMaxUses: 20,      // a line form used by fewer cluster passives than this (e.g. "Adds {0}") is also used
                                    // by other mods, so it only shows a popup when the name is found
+    keystoneNameMaxWords: 5,       // an English keystone line of this many words or fewer is only the name ("Avatar of Fire")
+    // Names found anywhere in a hovered line (keystones, skills). The lists come from checking every item line of
+    // the game data in both languages: these names are also other game words, so they would show the wrong effect.
+    nameScan: {
+      minLength: { ja: 3, en: 3 },            // shorter names ("亀裂") are parts of other words
+      exclude: {
+        ja: ['ブライト', '感電領域', 'ポータル', 'アンブッシュ'],
+        en: ['Blight', 'Ignite', 'Portal', 'Ambush', 'Reflection', 'Shocked Ground'],
+      },
+      // a name followed by one of these words is part of another game word ("Frenzy Charge", "Fireball Towers")
+      notBefore: { ja: [], en: ['Charge', 'Charges', 'Tower', 'Towers', 'Encounter', 'Encounters', 'Scroll', 'Scrolls'] },
+      // a name is not looked at in a line like this ("Power, Frenzy and Endurance Charges" are charges, not the skill)
+      skipIf: { ja: {}, en: { Frenzy: '(Power|Endurance)(,| or| and)|(,| or| and) (Power|Endurance)' } },
+      reminderMinFixed: 4,                    // a reminder line form needs at least this many fixed letters
+      // letters that may not touch a found name (so "フレンジー" is not found in "フレンジーチャージ")
+      boundary: { ja: 'ァ-ヶー・A-Za-z', en: "A-Za-z'\\-" },
+    },
+    // The POEDB button (always shown on the trade page; opens POEDB / POE2DB in a new tab)
+    dbButton: {
+      width: 88,                   // px, the part that opens POEDB
+      height: 75,
+      dragMargin: 12,              // px, the frame around it for moving it with the mouse
+      left: 24,                    // px, first place (below the account links at the top left)
+      top: 66,                     // below "メインサイトに戻る" (bottom at 61 px on the trade page)
+      zIndex: 2147482999,          // below the effect popup
+      frame: 'rgba(40, 30, 20, 0.85)',
+      frameBorder: '#6b5530',
+      background: '#1e160e',
+      border: '#c8a050',
+      icon: '#e0b860',
+      iconFill: '#3a2a16',
+      iconTop: '#5a4220',
+      text: '#ffe08a',
+    },
+    // POEDB site and language part of the address. Pages other than Japanese open in English.
+    poedb: {
+      poe1: 'https://poedb.tw/',
+      poe2: 'https://poe2db.tw/',
+      lang: { ja: 'jp', en: 'us' },
+    },
+    // trade "Item Category" id -> POEDB page. Categories without a page (e.g. "Any Weapon") open the top page.
+    poedbPages: {
+      poe1: {
+        'weapon.bow': 'Bows', 'weapon.claw': 'Claws', 'weapon.dagger': 'Daggers', 'weapon.basedagger': 'Daggers',
+        'weapon.runedagger': 'Rune_Daggers', 'weapon.oneaxe': 'One_Hand_Axes', 'weapon.onesword': 'One_Hand_Swords',
+        'weapon.basesword': 'One_Hand_Swords', 'weapon.rapier': 'Thrusting_One_Hand_Swords', 'weapon.onemace': 'One_Hand_Maces',
+        'weapon.basemace': 'One_Hand_Maces', 'weapon.sceptre': 'Sceptres', 'weapon.staff': 'Staves', 'weapon.basestaff': 'Staves',
+        'weapon.warstaff': 'Warstaves', 'weapon.twoaxe': 'Two_Hand_Axes', 'weapon.twomace': 'Two_Hand_Maces',
+        'weapon.twosword': 'Two_Hand_Swords', 'weapon.wand': 'Wands', 'weapon.rod': 'Fishing_Rods',
+        'armour.chest': 'Body_Armours', 'armour.boots': 'Boots', 'armour.gloves': 'Gloves', 'armour.helmet': 'Helmets',
+        'armour.shield': 'Shields', 'armour.quiver': 'Quivers',
+        'accessory.amulet': 'Amulets', 'accessory.belt': 'Belts', 'accessory.ring': 'Rings', 'accessory.trinket': 'Trinkets',
+        'gem': 'Gem', 'gem.activegem': 'Skill_Gems', 'gem.supportgem': 'Support_Gems', 'gem.supportgemplus': 'Support_Gems',
+        'jewel': 'Jewels', 'jewel.base': 'Jewels', 'jewel.abyss': 'Abyss_Jewels', 'jewel.cluster': 'Cluster_Jewel',
+        'flask': 'Flasks', 'map': 'Maps', 'map.fragment': 'Map_Fragments', 'map.breachstone': 'Breachstones',
+        'map.invitation': 'Misc_Map_Items', 'map.scarab': 'Map_Fragments', 'card': 'Divination_Cards',
+        'monster.beast': 'Bestiary', 'monster.yellowbeast': 'Bestiary', 'monster.redbeast': 'Bestiary',
+        'heistequipment': 'Heist', 'heistequipment.heistweapon': 'Heist_Gear', 'heistequipment.heisttool': 'Heist_Tools',
+        'heistequipment.heistutility': 'Heist_Cloaks', 'heistequipment.heistreward': 'Heist_Brooches',
+        'heistmission': 'Heist', 'heistmission.contract': 'Contracts', 'heistmission.blueprint': 'Blueprints',
+        'logbook': 'Expedition_Logbooks', 'sanctum.research': 'Sanctum_Research', 'sanctum.relic': 'Relics',
+        'tincture': 'Tinctures', 'corpse': 'Corpses', 'graft': 'Graft', 'chart': 'Chart', 'viscera': 'Viscera',
+        'currency': 'Currency', 'currency.piece': 'Pieces', 'currency.resonator': 'Resonator', 'currency.fossil': 'Fossil',
+        'currency.incubator': 'Incubators', 'currency.heistobjective': 'Heist_Targets', 'currency.omen': 'Omen',
+        'currency.tattoo': 'Tattoo',
+      },
+      poe2: {
+        'weapon.claw': 'Claws', 'weapon.dagger': 'Daggers', 'weapon.onesword': 'One_Hand_Swords', 'weapon.oneaxe': 'One_Hand_Axes',
+        'weapon.onemace': 'One_Hand_Maces', 'weapon.spear': 'Spears', 'weapon.flail': 'Flails', 'weapon.twosword': 'Two_Hand_Swords',
+        'weapon.twoaxe': 'Two_Hand_Axes', 'weapon.twomace': 'Two_Hand_Maces', 'weapon.warstaff': 'Quarterstaves',
+        'weapon.talisman': 'Talismans', 'weapon.bow': 'Bows', 'weapon.crossbow': 'Crossbows', 'weapon.wand': 'Wands',
+        'weapon.sceptre': 'Sceptres', 'weapon.staff': 'Staves', 'weapon.rod': 'Fishing_Rods',
+        'armour.helmet': 'Helmets', 'armour.chest': 'Body_Armours', 'armour.gloves': 'Gloves', 'armour.boots': 'Boots',
+        'armour.quiver': 'Quivers', 'armour.shield': 'Shields', 'armour.focus': 'Foci', 'armour.buckler': 'Bucklers',
+        'accessory.amulet': 'Amulets', 'accessory.belt': 'Belts', 'accessory.ring': 'Rings',
+        'gem': 'Gem', 'gem.activegem': 'Skill_Gems', 'gem.supportgem': 'Support_Gems', 'gem.metagem': 'Meta_Skill_Gem',
+        'jewel': 'Jewels', 'flask': 'Flasks', 'flask.life': 'Life_Flasks', 'flask.mana': 'Mana_Flasks', 'flask.charm': 'Charms',
+        'map.waystone': 'Waystones', 'map.fragment': 'Map_Fragments', 'map.breachstone': 'Breachstone', 'map.barya': 'Trial_Coins',
+        'map.bosskey': 'Pinnacle_Keys', 'map.ultimatum': 'Inscribed_Ultimatum', 'map.tablet': 'Tablet', 'card': 'Divination_Cards',
+        'sanctum.relic': 'Relics', 'currency': 'Stackable_Currency', 'currency.omen': 'Omen', 'currency.socketable': 'Augment',
+        'currency.rune': 'Runes', 'currency.soulcore': 'Augment', 'currency.idol': 'Augment',
+      },
+    },
   };
 
   const REPOE1 = 'https://raw.githubusercontent.com/repoe-fork/repoe-fork.github.io/master/data';
@@ -105,6 +187,8 @@
       notFound: 'このパッシブの効果は、データの中に見つかりませんでした。',
       skillTitle: (n, l) => `${n}(レベル ${l})`,
       skillNotFound: 'このスキルの効果は、データの中に見つかりませんでした。',
+      dbOpen: 'POEDB を新しいタブで開きます(検索中のアイテムの種類のページ)',
+      dbMove: 'ドラッグすると移動します',
       // the line of a support gem on an item: (level) (support's name)
       // ("ソケットされたジェムは…", "装備中の鎧によるスキルは…", "パッシブツリーによって付与されたスキルは…")
       supportLine: /^.+?は\s*レベル\s*(\d+)\s*(.+?)\s*(?:によって|により|に)\s*サポートされる$/,
@@ -125,6 +209,8 @@
       notFound: 'The effects of this passive were not found in the data.',
       skillTitle: (n, l) => `${n} (Level ${l})`,
       skillNotFound: 'The effects of this skill were not found in the data.',
+      dbOpen: 'Open POEDB in a new tab (the page of the item category being searched)',
+      dbMove: 'Drag to move',
       // ("Socketed Gems are…", "Skills from Equipped Body Armour are…", "Skills granted by your Passive Skill Tree are…")
       supportLine: /^.+? (?:are|is) Supported by Level (\d+) (.+?)$/i,
     },
@@ -136,11 +222,15 @@
   const TEST = window.__MPV_TEST__ || null;   // only set by the local test page
   const GAME = (TEST && TEST.game) || (location.pathname.startsWith('/trade2') ? 'poe2' : 'poe1');
   const LANG = (TEST && TEST.lang) || (location.hostname.startsWith('jp.') ? 'ja' : 'en');
+  // the trade site in other languages (de., fr., ...): only the POEDB button works there, because the
+  // detail data is made for Japanese and English
+  const OTHER_LANG = !TEST && !/^(www|jp)\./.test(location.hostname);
   const T = TEXT[LANG];
   const KEY_DATA = 'data_' + GAME;          // converted table
   const KEY_CHECK = 'check_' + GAME;        // { at: time of last check, latest: versions found }
-  // the script's own Version; stored with the data, so data made by an older script can be rebuilt
-  const SCRIPT_VERSION = (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) || '';
+  // The Version of the way the data is made; stored with the data, so data made by an older script is rebuilt.
+  // Change it only when the conversion changes (a new Version that only changes the page does not ask for a rebuild).
+  const DATA_VERSION = '1.2.0';
 
   // ---------------------------------------------------------------------------
   // Download helpers
@@ -436,7 +526,7 @@
   // for the same ids instead). Returns { ja: { line: entry }, en: { line: entry } }. A keystone that is not on the
   // tree (only on items) has no effect text in the data, so it gets a "not found" entry.
   function keystoneLines(enStat, jaStat, gggByName, jaByHash, en, toJapanese) {
-    const out = { ja: {}, en: {} };
+    const out = { ja: {}, en: {}, names: { ja: [], en: [] } };   // names: lines that are only a keystone's name
     const jaById = new Map();
     for (const e of jaStat) for (const id of e.ids) if (!jaById.has(id)) jaById.set(id, e);
     const keystoneNames = [...gggByName.values()].filter((n) => n.isKeystone).map((n) => n.name).sort((a, b) => b.length - a.length);
@@ -449,10 +539,14 @@
         const name = keystoneNames.find((k) => line === k || line.includes(k));
         const node = name && gggByName.get(name);
         out.en[line] = (name && en[name]) || fromReminder(line, v.reminder_text);
+        // "Avatar of Fire" is a name; "You have Shepherd of Souls if at least 4 ..." is a sentence
+        const isName = line.split(' ').length <= CONFIG.keystoneNameMaxWords;
+        if (isName) out.names.en.push(line);
         const jv = je && je.Japanese && je.ids.join('|') === e.ids.join('|') && (je.Japanese[vi] || je.Japanese[0]);
         if (!jv) return;
         const jline = normalize(stripMarkup(jv.string));
         if (!jline || /\{\d+\}/.test(jline)) return;
+        if (isName) out.names.ja.push(jline);
         let entry = node && jaByHash.get(node.skill);
         if (!entry && node) {
           // a newer keystone missing from RePoE's Japanese tree: turn the official English text into Japanese
@@ -530,15 +624,32 @@
     }
     for (const id of Object.values(supports)) used.add(id);
 
+    // Skill names found anywhere in a line ("Herald of Thunder has 20% increased Mana Reservation Efficiency"):
+    // name -> gem id. Names that are also other game words (Blight: the league, Ignite: the ailment) are left out.
+    const L = lang === 'Japanese' ? 'ja' : 'en';
+    const exclude = new Set(CONFIG.nameScan.exclude[L]);
+    const scanNames = {};
+    for (const [id, g] of Object.entries(gems)) {
+      if (!g) continue;
+      const n = stripMarkup(String((g.active_skill && g.active_skill.display_name) || (g.is_support && supportName(g)) || '')).trim();
+      if (n.length < CONFIG.nameScan.minLength[L] || exclude.has(n)) continue;
+      const old = scanNames[n] && gems[scanNames[n]];
+      if (!old || (!old.base_item && g.base_item)) scanNames[n] = id;
+    }
+    const nameOnly = new Set(Object.values(scanNames).filter((id) => !used.has(id)));
+
     const clean = (s) => stripMarkup(String(s)).split('\n').map((x) => x.trim()).filter(Boolean);
     const texts = (o) => [].concat(...Object.values((o && o.stat_text) || {}).map(clean));
     const skills = {};
-    for (const id of used) {
+    for (const id of [...used, ...nameOnly]) {
       const g = gems[id];
       const lv = {};
-      for (const [level, p] of Object.entries(g.per_level || {})) {
-        const t = texts(p);
-        if (t.length) lv[level] = t;
+      // a skill only named in a line has no level there, so its level texts are not kept (they are large)
+      if (!nameOnly.has(id)) {
+        for (const [level, p] of Object.entries(g.per_level || {})) {
+          const t = texts(p);
+          if (t.length) lv[level] = t;
+        }
       }
       const a = g.active_skill;
       const desc = a ? a.description : g.support_gem && g.support_gem.support_text;
@@ -549,7 +660,27 @@
         lv,
       };
     }
-    return { templates, skills, supports };
+    return { templates, skills, supports, names: scanNames };
+  }
+
+  // Item lines whose game text has a reminder ("ヒット時に敵を灰まみれにする" -> "(灰まみれの敵は…)"):
+  // [{ t: line with {0} holes, r: [reminder lines] }]. A form with too little fixed text ("{0}") is left out.
+  function reminderTemplates(statList, lang) {
+    const byText = new Map();
+    for (const e of statList) {
+      for (const v of e[lang] || []) {
+        if (!v.reminder_text || !v.string) continue;
+        let r = stripMarkup(String(v.reminder_text)).trim();
+        if (lang === 'Japanese') r = cleanJaReminder(r);
+        const rl = r.split('\n').map((x) => x.trim()).filter(Boolean);
+        for (const line of stripMarkup(v.string).split('\n')) {
+          const t = normalize(line);
+          if (t.replace(/\{\d+\}|[\s+\-%#]/g, '').length < CONFIG.nameScan.reminderMinFixed) continue;
+          byText.set(t, unique((byText.get(t) || []).concat(rl)));
+        }
+      }
+    }
+    return [...byText].map(([t, r]) => ({ t, r }));
   }
 
   function convertPoe1(f, versions) {
@@ -614,7 +745,10 @@
     }
     // the game shows each reminder once, even when several lines name the same word ("Arcane Surge")
     for (const entry of Object.values(ja)) entry.r = unique(entry.r.map(cleanJaReminder));
-    const lines = keystoneLines(f.enStat, f.jaStat, gggByName, jaByHash, en, toJapanese);
+    const kl = keystoneLines(f.enStat, f.jaStat, gggByName, jaByHash, en, toJapanese);
+    const lines = { ja: kl.ja, en: kl.en };
+    const keystoneNames = { ja: unique(kl.names.ja), en: unique(kl.names.en) };
+    const reminders = { ja: reminderTemplates(f.jaStat, 'Japanese'), en: reminderTemplates(f.enStat, 'English') };
 
     return {
       versions,
@@ -625,6 +759,8 @@
       },
       names: { ja, en },
       lines,
+      keystoneNames,
+      reminders,
       counts: { ja: Object.keys(ja).length, en: Object.keys(en).length, clusterTotal, clusterJapaneseMissing },
     };
   }
@@ -683,7 +819,7 @@
         });
         gems = null;
       }
-      data.scriptVersion = SCRIPT_VERSION;
+      data.scriptVersion = DATA_VERSION;
       GM_setValue(KEY_DATA, data);
       GM_setValue(KEY_CHECK, { at: Date.now(), latest: versions });
       loadTable();
@@ -702,8 +838,8 @@
     if (!data) { showButton(T.buttonFirst, false); return; }
     // the skills are downloaded for one language at a time
     if (GAME === 'poe1' && !(data.skills && data.skills[LANG])) { showButton(T.buttonFirst, false); return; }
-    // the data was made by another Version of this script: the way of making it may have changed
-    if (SCRIPT_VERSION && data.scriptVersion !== SCRIPT_VERSION) { showButton(T.buttonNew, false); return; }
+    // the data was made by an older way of making it
+    if (data.scriptVersion !== DATA_VERSION) { showButton(T.buttonNew, false); return; }
     const check = GM_getValue(KEY_CHECK, null);
     const due = !check || Date.now() - check.at > CONFIG.checkIntervalHours * 3600 * 1000;
     let latest = check && check.latest;
@@ -728,18 +864,40 @@
   let lineTable = {};      // whole line text -> entry (keystone lines)
   let skillTable = {};     // skill id -> skill (skills granted by items)
   let supportTable = {};   // support gem name -> skill id (support gems on items)
+  let nameRx = null;       // finds keystone and skill names anywhere in a line
+  let nameKinds = {};      // name -> { k: keystone entry } | { s: skill id }
+  let reminderMatchers = []; // [{ rx, r }] lines whose game text has a reminder
   const cache = new Map(); // line text -> entry | null
 
   function loadTable() {
     cache.clear();
     if (typeof hidePopup === 'function' && popup) hidePopup();   // the shown text may be from before the update
     const data = GM_getValue(KEY_DATA, null);
+    nameRx = null; nameKinds = {}; reminderMatchers = [];
     if (!data) { table = null; lineTable = {}; skillTable = {}; supportTable = {}; matchers = []; return; }
     table = data.names[LANG] || {};
     lineTable = (data.lines && data.lines[LANG]) || {};
     const sk = (data.skills && data.skills[LANG]) || { templates: [], skills: {} };
     skillTable = sk.skills;
     supportTable = sk.supports || {};
+
+    // names found anywhere in a line: keystones first (a skill can have the same name), longer names first
+    for (const [n, id] of Object.entries(sk.names || {})) nameKinds[n] = { s: id };
+    for (const n of (data.keystoneNames && data.keystoneNames[LANG]) || []) {
+      const e = lineTable[n] || table[n];
+      if (e && !e.missing) nameKinds[n] = { k: e };
+    }
+    const S = CONFIG.nameScan;
+    const scanList = Object.keys(nameKinds).sort((a, b) => b.length - a.length).map(escapeRe);
+    if (scanList.length) {
+      const b = S.boundary[LANG] || S.boundary.en;
+      const after = (S.notBefore[LANG] || []).length ? `(?!\\s+(?:${S.notBefore[LANG].map(escapeRe).join('|')})(?![A-Za-z]))` : '';
+      nameRx = new RegExp(`(?<![${b}])(${scanList.join('|')})(?![${b}])${after}`, 'g');
+    }
+    reminderMatchers = ((data.reminders && data.reminders[LANG]) || []).map(({ t, r }) => ({
+      rx: new RegExp('^' + t.split(/\{\d+\}/).map((p) => escapeRe(p).replace(/\s+/g, '\\s*')).join('(.+?)') + '$', 'i'),
+      r,
+    }));
     // strict forms first, and longer forms first ("Allocates {0} if you have ... Forbidden Flesh" before "Allocates {0}")
     const list = (data.templates[LANG] || []).map((x) => ({ t: x.t, loose: x.loose, skill: null }))
       .concat(sk.templates.map((x) => ({ t: x.t, loose: false, skill: x.id })))
@@ -794,8 +952,45 @@
       if (found) { result = found; break; }
       if (!loose) { result = { n: name, l: [], r: [], missing: true }; break; }
     }
+    if (!result) result = findNamesAndReminders(normalize(text));
     cache.set(text, result);
     return result;
+  }
+
+  // Any other line: the keystones and skills named in it, and the game's reminder for the line's form.
+  // ("召喚したスケルトンはアバターオブファイヤーを持つ", "ヘラルドオブサンダーのマナリザーブ効率が20%増加する")
+  function findNamesAndReminders(text) {
+    const parts = [];
+    if (nameRx) {
+      nameRx.lastIndex = 0;
+      const seen = new Set();
+      for (const m of text.matchAll(nameRx)) {
+        const n = m[1];
+        if (seen.has(n)) continue;
+        seen.add(n);
+        const skip = (CONFIG.nameScan.skipIf[LANG] || {})[n];
+        if (skip && new RegExp(skip).test(text)) continue;
+        const kind = nameKinds[n];
+        const e = kind.k || nameEntry(kind.s);
+        if (e) parts.push(e);
+      }
+    }
+    for (const { rx, r } of reminderMatchers) {
+      if (!rx.test(text)) continue;
+      // the reminder can repeat the effects already shown ("(Avatar of Fire: 50% of Physical, ...)")
+      const flat = (s) => String(s).replace(/^\(\s*[A-Za-z][A-Za-z0-9 '\-]*:\s*/, '').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+      const known = [].concat(...parts.map((p) => (p.l || []).concat(p.r || []))).map(flat).join('|');
+      const rest = r.filter((x) => { const f = flat(x); return f && !known.includes(f); });
+      if (rest.length) parts.push({ n: '', l: [], r: rest });
+      break;
+    }
+    if (!parts.length) return null;
+    return parts.length === 1 ? parts[0] : { multi: parts };
+  }
+
+  function nameEntry(id) {
+    const s = skillTable[id];
+    return s ? { n: s.n, d: s.d, l: s.s, r: [] } : null;
   }
 
   // ---------------------------------------------------------------------------
@@ -813,6 +1008,7 @@
     .mpv-desc { color: ${C.reminder}; margin-bottom: 4px; }
     .mpv-rem { color: ${C.reminder}; font-size: ${CONFIG.fontSize - 1}px; margin-top: 4px; }
     .mpv-note { color: ${C.note}; font-size: ${CONFIG.fontSize - 1}px; margin-top: 6px; }
+    .mpv-sep { border-top: 1px solid ${C.border}; margin: 6px 0; }
     .mpv-button { position: fixed; right: 12px; bottom: 12px; z-index: 2147483001; max-width: 360px;
       padding: 6px 12px; cursor: pointer; font-size: ${CONFIG.fontSize}px; text-align: left;
       color: ${C.buttonText}; background: ${C.buttonBackground}; border: 1px solid ${C.border}; border-radius: 4px; }
@@ -852,7 +1048,19 @@
       popup.appendChild(el('mpv-note', T.noData));
       return;
     }
-    popup.appendChild(el('mpv-name', entry.n));
+    if (entry.multi) {
+      // several names in one line: each one's effects, one under another
+      entry.multi.forEach((part, i) => {
+        if (i) popup.appendChild(el('mpv-sep', ''));
+        fillPart(part);
+      });
+      return;
+    }
+    fillPart(entry);
+  }
+
+  function fillPart(entry) {
+    if (entry.n) popup.appendChild(el('mpv-name', entry.n));
     if (entry.missing) popup.appendChild(el('mpv-note', entry.skillMissing ? T.skillNotFound : T.notFound));
     for (const d of entry.d || []) popup.appendChild(el('mpv-desc', d));
     for (const l of entry.l) popup.appendChild(el('mpv-line', l));
@@ -902,6 +1110,7 @@
   }
 
   document.addEventListener('mouseover', (ev) => {
+    if (OTHER_LANG) return;
     const row = ev.target instanceof Element ? ev.target.closest(ROW_SELECTOR) : null;
     if (row === currentRow) return;
     clearTimeout(timer);
@@ -933,8 +1142,140 @@
   window.addEventListener('resize', () => { if (currentRow) placePopup(currentRow); });
 
   // ---------------------------------------------------------------------------
+  // POEDB button (top left; the frame around it moves it, the inside opens POEDB)
+  // ---------------------------------------------------------------------------
+  const KEY_DB_POS = 'dbButtonPos';         // { left, top } in px, the same for POE1 and POE2
+  let categories = null;                     // [{ id, text }] of the trade site's "Item Category", in the page's language
+  let categoryTitle = '';                    // the filter's title ("アイテムカテゴリー", "Item Category")
+
+  async function loadCategories() {
+    try {
+      const r = await fetch(GAME === 'poe2' ? '/api/trade2/data/filters' : '/api/trade/data/filters', { credentials: 'same-origin' });
+      const j = await r.json();
+      const type = j.result.find((x) => x.id === 'type_filters');
+      const cat = type && type.filters.find((x) => x.id === 'category');
+      if (!cat) return;
+      categoryTitle = String(cat.text || '').trim();
+      categories = cat.option.options.filter((o) => o.id).map((o) => ({ id: o.id, text: String(o.text).trim() }));
+    } catch (e) {
+      console.warn('[Mouseover Detail Viewer] item categories could not be read', e);   // the button opens the top page
+    }
+  }
+
+  // "One-Handed Sword" and "One Handed Sword" are the same; the result's item class has no "Any"/"いずれかの"
+  const squash = (s) => String(s).toLowerCase().replace(/[\s\-‐_・]/g, '');
+  function categoryIdOf(text) {
+    if (!categories || !text) return null;
+    const t = squash(text);
+    if (!t) return null;
+    const exact = categories.find((c) => squash(c.text) === t);
+    if (exact) return exact.id;
+    const ends = categories.filter((c) => squash(c.text).endsWith(t)).sort((a, b) => a.text.length - b.text.length);
+    return ends.length ? ends[0].id : null;
+  }
+
+  function searchedCategory() {
+    // 1. the "Item Category" filter of the search
+    const title = categoryTitle && [...document.querySelectorAll('.filter-title')].find((e) => e.textContent.trim() === categoryTitle);
+    const filter = title && title.closest('.filter');
+    if (filter) {
+      const picked = filter.querySelector('.multiselect__single');
+      const input = filter.querySelector('.multiselect__input');
+      const id = categoryIdOf((picked && picked.textContent) || (input && input.value));
+      if (id) return id;
+    }
+    // 2. the item class shown on the first result ("弓", "Bow"); it is the first line of the item that has no value
+    const first = document.querySelector('.resultset .item-popup__content > .item-popup__property');
+    if (first && first.querySelectorAll('span').length <= 2) {   // "Physical Damage: 32-96" has more spans
+      const id = categoryIdOf(first.textContent);
+      if (id) return id;
+    }
+    return null;
+  }
+
+  function poedbUrl() {
+    const base = CONFIG.poedb[GAME] + (CONFIG.poedb.lang[LANG] || CONFIG.poedb.lang.en) + '/';
+    const id = searchedCategory();
+    const page = id && CONFIG.poedbPages[GAME][id];
+    return page ? base + page : base;
+  }
+
+  function makeDbButton() {
+    const B = CONFIG.dbButton;
+    const css = document.createElement('style');
+    css.textContent = `
+      .mpv-db { position: fixed; z-index: ${B.zIndex}; box-sizing: border-box; padding: ${B.dragMargin}px;
+        background: ${B.frame}; border: 1px dashed ${B.frameBorder}; border-radius: 8px; cursor: move;
+        touch-action: none; user-select: none; }
+      .mpv-db a { display: block; box-sizing: border-box; width: ${B.width}px; height: ${B.height}px; cursor: pointer;
+        background: ${B.background}; border: 2px solid ${B.border}; border-radius: 6px; }
+      .mpv-db a:hover { filter: brightness(1.25); }
+      .mpv-db svg { display: block; width: 100%; height: 100%; }
+    `;
+    document.head.appendChild(css);
+
+    const box = document.createElement('div');
+    box.className = 'mpv-db';
+    box.title = T.dbMove;
+    const link = document.createElement('a');
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.title = T.dbOpen;
+    link.href = poedbUrl();
+    // a cylinder (the shape of a database) with "DB" on it
+    link.innerHTML = `<svg viewBox="0 0 88 75" aria-hidden="true">
+      <path d="M21,16 L21,56 A23,7 0 0 0 67,56 L67,16" fill="${B.iconFill}" stroke="${B.icon}" stroke-width="2"/>
+      <path d="M21,30 A23,7 0 0 0 67,30" fill="none" stroke="${B.icon}" stroke-width="1.5"/>
+      <path d="M21,44 A23,7 0 0 0 67,44" fill="none" stroke="${B.icon}" stroke-width="1.5"/>
+      <ellipse cx="44" cy="16" rx="23" ry="7" fill="${B.iconTop}" stroke="${B.icon}" stroke-width="2"/>
+      <text x="44" y="47" fill="${B.text}" font-size="17" font-weight="bold" font-family="sans-serif" text-anchor="middle">DB</text>
+    </svg>`;
+    link.setAttribute('aria-label', T.dbOpen);
+    // the address is decided when the link is about to be used, so it follows the current search
+    const refresh = () => { link.href = poedbUrl(); };
+    link.addEventListener('pointerenter', refresh);
+    link.addEventListener('pointerdown', refresh);
+    link.addEventListener('focus', refresh);
+    box.appendChild(link);
+    document.body.appendChild(box);
+
+    const place = (left, top) => {
+      const vw = document.documentElement.clientWidth;
+      const vh = document.documentElement.clientHeight;
+      const r = box.getBoundingClientRect();
+      // keep it inside the window (for example after the window was made smaller)
+      left = Math.min(Math.max(0, left), Math.max(0, vw - r.width));
+      top = Math.min(Math.max(0, top), Math.max(0, vh - r.height));
+      box.style.left = Math.round(left) + 'px';
+      box.style.top = Math.round(top) + 'px';
+      return { left: Math.round(left), top: Math.round(top) };
+    };
+    const saved = GM_getValue(KEY_DB_POS, null);
+    let pos = place(saved ? saved.left : B.left, saved ? saved.top : B.top);
+
+    // drag by the frame only; the inside is the link
+    let drag = null;
+    box.addEventListener('pointerdown', (ev) => {
+      if (ev.button !== 0 || link.contains(ev.target)) return;
+      drag = { x: ev.clientX - pos.left, y: ev.clientY - pos.top };
+      box.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    box.addEventListener('pointermove', (ev) => {
+      if (drag) pos = place(ev.clientX - drag.x, ev.clientY - drag.y);
+    });
+    const end = () => { if (drag) { drag = null; GM_setValue(KEY_DB_POS, pos); } };
+    box.addEventListener('pointerup', end);
+    box.addEventListener('pointercancel', end);
+    window.addEventListener('resize', () => { pos = place(pos.left, pos.top); });
+  }
+
+  // ---------------------------------------------------------------------------
   // Start
   // ---------------------------------------------------------------------------
+  makeDbButton();
+  loadCategories();
+  if (OTHER_LANG) return;
   GM_registerMenuCommand(T.menuUpdate, updateData);
   loadTable();
   if (!(GAME === 'poe2' && LANG === 'ja')) dailyCheck();
