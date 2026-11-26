@@ -40,7 +40,10 @@ Mouseover Detail Viewer はその拡張機能の土台を利用して動作す�
 ■ インストール方法
 
 1. Chrome か Edge に、拡張機能の Tampermonkey をインストールします。
-   Tampermonkey: https://www.tampermonkey.net/
+   ・Chrome: Chrome ウェブストアの次のページを開き、「Chrome に追加」を押します。
+     https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo
+   ・Edge: Edge アドオンの次のページを開き、「インストール」を押します。
+     https://microsoftedge.microsoft.com/addons/detail/iikmkjmpaadaobahmlepeloendndfphd
 2. Tampermonkey が Mouseover Detail Viewer を動かせるようにします。
    ・Chrome: 拡張機能の管理画面(chrome://extensions)で、Tampermonkey の「詳細」(Details)を開き、「ユーザー スクリプトを許可する」(Allow User Scripts)を有効にします。
    ・Edge: 拡張機能の管理画面(edge://extensions)で、「開発者モード」(Developer mode)を有効にします。
@@ -133,7 +136,10 @@ A "DB" button is always shown at the top left of the trade page. Click it to ope
 ■ Install
 
 1. Install Tampermonkey in Chrome or Edge.
-   Tampermonkey: https://www.tampermonkey.net/
+   ・Chrome: open this Chrome Web Store page and click "Add to Chrome".
+     https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo
+   ・Edge: open this Edge Add-ons page and click "Get".
+     https://microsoftedge.microsoft.com/addons/detail/iikmkjmpaadaobahmlepeloendndfphd
 2. Let Tampermonkey run Mouseover Detail Viewer:
    ・Chrome: open chrome://extensions, open Tampermonkey's "Details", and turn on "Allow User Scripts".
    ・Edge: open edge://extensions and turn on "Developer mode".
