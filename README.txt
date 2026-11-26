@@ -39,16 +39,20 @@ Mouseover Detail Viewer はその拡張機能の土台を利用して動作す�
 
 ■ インストール方法
 
-1. Chrome か Edge に、拡張機能の Tampermonkey をインストールします。
-   ・Chrome: Chrome ウェブストアの次のページを開き、「Chrome に追加」を押します。
-     https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo
-   ・Edge: Edge アドオンの次のページを開き、「インストール」を押します。
-     https://microsoftedge.microsoft.com/addons/detail/iikmkjmpaadaobahmlepeloendndfphd
-2. Tampermonkey が Mouseover Detail Viewer を動かせるようにします。
-   ・Chrome: 拡張機能の管理画面(chrome://extensions)で、Tampermonkey の「詳細」(Details)を開き、「ユーザー スクリプトを許可する」(Allow User Scripts)を有効にします。
-   ・Edge: 拡張機能の管理画面(edge://extensions)で、「開発者モード」(Developer mode)を有効にします。
-3. 次のアドレスを開き、Tampermonkey の画面で「インストール」を押します。
-   https://raw.githubusercontent.com/hanzoh-games/MouseoverDetailViewer/main/MouseoverDetailViewer.user.js
+1. Tampermonkey をインストールする
+   ① 下のアドレスをコピーして、ブラウザの一番上のアドレス欄に貼り付け、Enter キーを押す
+      ・Chrome: https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo
+      ・Edge: https://microsoftedge.microsoft.com/addons/detail/iikmkjmpaadaobahmlepeloendndfphd
+   ② 開いた Tampermonkey のページの右上にある、青いボタン「Chrome に追加」(Edge は「インストール」)を押す
+   ③ 確認画面の「拡張機能を追加」(Edge は「拡張機能の追加」)を押す
+2. Tampermonkey の「ユーザー スクリプトを許可する」を有効にする
+   ① ブラウザの一番上のアドレス欄に chrome://extensions(Edge は edge://extensions)を入力して、Enter キーを押す
+   ② Tampermonkey の「詳細」ボタンを押す
+   ③ 「ユーザー スクリプトを許可する」の右のスイッチを押して、青くする
+3. Mouseover Detail Viewer をインストールする
+   ① 下のアドレスをコピーして、ブラウザの一番上のアドレス欄に貼り付け、Enter キーを押す
+      https://raw.githubusercontent.com/hanzoh-games/MouseoverDetailViewer/main/MouseoverDetailViewer.user.js
+   ② 開いた Tampermonkey の画面の「インストール」ボタンを押す
 
 「全部のサイトのデータの読み取りと変更」と表示されても大丈夫です
 これは Tampermonkey が、いろいろなサイト用の機能を動かせる道具だから表示されます。Mouseover Detail Viewer が動くのは Path of Exile のトレードページだけで、他のサイトでは何もしません。インストール画面でも、動くページ(pathofexile.com/trade)と接続先(GitHub)の一覧で確認できます。
@@ -56,34 +60,37 @@ Mouseover Detail Viewer はその拡張機能の土台を利用して動作す�
 
 ■ 最初にすること
 
-トレード画面を開くと、右下に「効果データ ★ 押すとデータを取得します」が表示されます。これを1回押してください。データ取得には10秒ほどかかります。終わった後は、行にマウスカーソルを重ねるだけです。
+① トレード画面の右下に表示される「効果データ ★ 押すとデータを取得します」を押す(10秒ほどかかります)
+② 調べたい行に、マウスカーソルを重ねる
 
-・ゲームデータが新しくなった時は、右下に「効果データ ★ 新しいデータがあります」が表示されます。押すと更新します(トレード画面を開いた時に、前の確認から24時間以上たっていれば確認します)。
-・いつでも、Tampermonkey のメニューの「データを更新」から更新できます。
+・ゲームデータが新しくなると、右下に「効果データ ★ 新しいデータがあります」が表示されます。それを押すと更新します(トレード画面を開いた時に、前の確認から24時間以上たっていれば確認します)。
+・ブラウザの右上の拡張機能ボタン(パズルの形)→「Tampermonkey」→「データを更新」の順に押すと、いつでも更新できます。
 ・日本語画面と英語画面では、別々にデータを取得します。
 
 
 ■ Mouseover Detail Viewer の更新について
 
-Mouseover Detail Viewer が新しくなると、Tampermonkey が自動で入れ替えます(Tampermonkey の初期設定では、約1日ごとに確認します)。開いたままのトレード画面では、前の Mouseover Detail Viewer が動き続けるので、読み込み直してください(F5 キー)。ブラウザを閉じる必要はありません。
-読み込み直した後、右下に「効果データ ★ 新しいデータがあります」が表示された時は、押して効果データを作り直してください。
+Mouseover Detail Viewer が新しくなると、Tampermonkey が自動で入れ替えます(Tampermonkey の初期設定では、約1日ごとに確認します)。ブラウザを閉じる必要はありません。
+① 開いたままのトレード画面で、F5 キーを押して読み込み直す
+② 右下に「効果データ ★ 新しいデータがあります」が表示された時は、それを押す
 
 
 ■ 困った時
 
 ・Tampermonkey のアイコンに赤い数字(1 など)が付いている
-  更新のお知らせではありません。そのページで動いている、Tampermonkey に入れた機能の数です。トレード画面では、Mouseover Detail Viewer が動いているので「1」と表示されます。数字を表示しないようにするには、次の手順で設定してください。
-  1. Tampermonkey のアイコン →「ダッシュボード」を開き、「設定」タブを押す
-  2. 一番上の「設定のモード」を「上級者」にする
-  3. 「操作メニュー」欄の「アイコン バッジの情報」を「無効」にし、その下の「保存」を押す
+  更新のお知らせではありません。そのページで動いている、Tampermonkey に入れた機能の数です。トレード画面では、Mouseover Detail Viewer が動いているので「1」と表示されます。数字を表示しないようにするには:
+  ① ブラウザの右上の、赤い数字が付いた Tampermonkey のアイコンを押し、「ダッシュボード」を押す
+  ② 開いた画面の上の「設定」タブを押す
+  ③ 一番上の「設定のモード」を「上級者」にする
+  ④ 「操作メニュー」欄の「アイコン バッジの情報」を「無効」にし、その下の「保存」を押す
 ・何も表示されない
-  「インストール方法」の2番を確認してください。Tampermonkey が Mouseover Detail Viewer を動かせない状態だと、何も表示されません。
+  「インストール方法」の2番を、もう一度行ってください。
 ・「GitHub の回数上限に達しました」と表示された
-  1時間ほど待ってから、もう一度押してください。
+  1時間ほど待ってから、右下の「効果データ ★」をもう一度押してください。
 ・「データの中に見つかりませんでした」と表示された
   公開されているデータに、その効果文がありません(アイテムだけが持つ一部のキーストーンとスキル)。
 ・POE2 の日本語画面で表示されない
-  POE2 の日本語データが公開されていないためです。トレード画面を英語に切り替えると表示できます。
+  POE2 の日本語データが公開されていないためです。トレード画面の右上の国旗の並びから、イギリスの国旗を押して、英語画面に切り替えてください。
 
 
 ■ データについて
@@ -135,16 +142,20 @@ A "DB" button is always shown at the top left of the trade page. Click it to ope
 
 ■ Install
 
-1. Install Tampermonkey in Chrome or Edge.
-   ・Chrome: open this Chrome Web Store page and click "Add to Chrome".
-     https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo
-   ・Edge: open this Edge Add-ons page and click "Get".
-     https://microsoftedge.microsoft.com/addons/detail/iikmkjmpaadaobahmlepeloendndfphd
-2. Let Tampermonkey run Mouseover Detail Viewer:
-   ・Chrome: open chrome://extensions, open Tampermonkey's "Details", and turn on "Allow User Scripts".
-   ・Edge: open edge://extensions and turn on "Developer mode".
-3. Open this address and click "Install":
-   https://raw.githubusercontent.com/hanzoh-games/MouseoverDetailViewer/main/MouseoverDetailViewer.user.js
+1. Install Tampermonkey
+   ① Copy the address below, paste it into the address bar at the top of your browser, and press Enter
+      ・Chrome: https://chromewebstore.google.com/detail/dhdgffkkebhmkfjojejmpbldmpobfkfo
+      ・Edge: https://microsoftedge.microsoft.com/addons/detail/iikmkjmpaadaobahmlepeloendndfphd
+   ② On the Tampermonkey page that opens, click the blue button "Add to Chrome" (Edge: "Get") at the top right
+   ③ In the confirmation, click "Add extension"
+2. Turn on "Allow User Scripts" for Tampermonkey
+   ① Type chrome://extensions (Edge: edge://extensions) into the address bar at the top of your browser, and press Enter
+   ② Click the "Details" button of Tampermonkey
+   ③ Click the switch to the right of "Allow User Scripts" so that it turns blue
+3. Install Mouseover Detail Viewer
+   ① Copy the address below, paste it into the address bar at the top of your browser, and press Enter
+      https://raw.githubusercontent.com/hanzoh-games/MouseoverDetailViewer/main/MouseoverDetailViewer.user.js
+   ② On the Tampermonkey screen that opens, click the "Install" button
 
 "Read and change all your data on all websites" is shown
 This is shown because Tampermonkey can run add-ons for any site. Mouseover Detail Viewer only runs on the Path of Exile trade pages and does nothing on other sites. The install screen also lists where it runs (pathofexile.com/trade) and what it connects to (GitHub).
@@ -152,34 +163,37 @@ This is shown because Tampermonkey can run add-ons for any site. Mouseover Detai
 
 ■ First use
 
-On the trade page, click "Detail data ★ Click to download" at the bottom right once (about 10 seconds). After that, just hover the mouse cursor over the lines.
+① Click "Detail data ★ Click to download" shown at the bottom right of the trade page (about 10 seconds)
+② Hover the mouse cursor over the line you want to check
 
 ・When the game data is new, "Detail data ★ New data available" is shown at the bottom right. Click it to update (checked when you open the trade page, if 24 hours or more have passed since the last check).
-・You can update at any time with "Update data" in the Tampermonkey menu.
+・You can update at any time: click the extensions button (puzzle shape) at the top right of your browser → "Tampermonkey" → "Update data".
 ・The Japanese and English trade pages download their data separately.
 
 
 ■ Updates of Mouseover Detail Viewer
 
-When Mouseover Detail Viewer is updated, Tampermonkey replaces it automatically (with Tampermonkey's default settings, it checks about once a day). A trade page that is already open keeps running the old version, so reload it (F5). You do not need to close the browser.
-If "Detail data ★ New data available" appears at the bottom right after reloading, click it to rebuild the detail data.
+When Mouseover Detail Viewer is updated, Tampermonkey replaces it automatically (with Tampermonkey's default settings, it checks about once a day). You do not need to close the browser.
+① On a trade page that is already open, press F5 to reload it
+② If "Detail data ★ New data available" appears at the bottom right, click it
 
 
 ■ Troubleshooting
 
 ・A red number (such as 1) is on the Tampermonkey icon
   It is not an update notice. It is the number of Tampermonkey add-ons running on that page. On the trade page Mouseover Detail Viewer runs, so "1" is shown. To hide the number:
-  1. Click the Tampermonkey icon -> "Dashboard", then open the "Settings" tab.
-  2. Set "Config mode" at the top to "Advanced".
-  3. In "Action Menu", set "Icon badge info" to "Disabled", then click "Save" below it.
+  ① Click the Tampermonkey icon with the red number at the top right of your browser, then click "Dashboard"
+  ② Click the "Settings" tab at the top of the screen that opens
+  ③ Set "Config mode" at the top to "Advanced"
+  ④ In "Action Menu", set "Icon badge info" to "Disabled", then click "Save" below it
 ・Nothing is shown
-  Check step 2 of "Install". If Tampermonkey cannot run Mouseover Detail Viewer, nothing is shown.
+  Do step 2 of "Install" again.
 ・"GitHub request limit reached" is shown
-  Wait about an hour, then click again.
+  Wait about an hour, then click "Detail data ★" at the bottom right again.
 ・"... were not found in the data" is shown
   The public data has no effect text for it (some keystones and skills that only items have).
 ・Nothing is shown on the Japanese POE2 trade page
-  The Japanese POE2 data is not published. Switch the trade page to English to see the effects.
+  The Japanese POE2 data is not published. Click the UK flag at the top right of the trade page to switch to English.
 
 
 ■ Data
