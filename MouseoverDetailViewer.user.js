@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mouseover Detail Viewer
 // @namespace    https://github.com/hanzoh-games/MouseoverDetailViewer
-// @version      1.2.0
-// @description  Path of Exile trade: hover a line that only names a passive, keystone or granted skill to see its effects, and open POEDB with one click. / Path of Exile のトレードの画面で、パッシブ・キーストーン・アイテムが付与するスキルの名前の行にマウスを重ねると、効果を表示します。POEDB もボタン1つで開けます。
+// @version      1.2.1
+// @description  Path of Exile trade: hover a line that names a passive, keystone or skill to see its effects, and open POEDB with one click. / Path of Exile のトレード画面で、パッシブ名・キーストーン名・スキル名が入った行にマウスカーソルを重ねると、その効果を表示します。POEDB もボタン1つで開けます。
 // @author       hanzoh-games
 // @license      MIT
 // @match        https://*.pathofexile.com/trade*
@@ -180,10 +180,10 @@
       converting: 'データを変換中…',
       done: (n) => `更新しました(パッシブ ${n} 個)`,
       failed: (m) => `更新できませんでした: ${m}`,
-      rateLimited: 'GitHub の回数の上限に達しました。1時間ほど後に、もう一度押してください。',
-      noData: '効果データがありません。画面の右下の「効果データ ★」か、Tampermonkey のメニューの「データを更新」を押してください。',
+      rateLimited: 'GitHub の回数上限に達しました。1時間ほど後に、もう一度押してください。',
+      noData: '効果データがありません。画面右下の「効果データ ★」か、Tampermonkey のメニューの「データを更新」を押してください。',
       noJapanese: '日本語の文がありません(英語の文を表示しています)。',
-      noJapaneseData: 'POE2 の日本語のデータは公開されていないため、日本語の画面では表示できません。トレードの画面を英語に切り替えると表示できます。',
+      noJapaneseData: 'POE2 の日本語データは公開されていないため、日本語画面では表示できません。トレード画面を英語に切り替えると表示できます。',
       notFound: 'このパッシブの効果は、データの中に見つかりませんでした。',
       skillTitle: (n, l) => `${n}(レベル ${l})`,
       skillNotFound: 'このスキルの効果は、データの中に見つかりませんでした。',
