@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Mouseover Detail Viewer
 // @namespace    https://github.com/hanzoh-games/MouseoverDetailViewer
-// @version      1.2.1
-// @description  Path of Exile trade: hover a line that names a passive, keystone or skill to see its effects, and open POEDB with one click. / Path of Exile のトレード画面で、パッシブ名・キーストーン名・スキル名が入った行にマウスカーソルを重ねると、その効果を表示します。POEDB もボタン1つで開けます。
+// @version      1.3.0
+// @description  Path of Exile trade: hover a line that names a passive, keystone, skill or buff to see its effects, and open POEDB with one click. / Path of Exile のトレード画面で、パッシブ名・キーストーン名・スキル名・バフ名が入った行にマウスカーソルを重ねると、その効果を表示します。POEDB もボタン1つで開けます。
 // @author       hanzoh-games
 // @license      MIT
 // @match        https://*.pathofexile.com/trade*
@@ -33,10 +33,25 @@
   const CONFIG = {
     checkIntervalHours: 24,        // how often to check for new data (GitHub allows 60 API calls per hour without login)
     popupMaxWidth: 460,            // px
+    // The popup is shown left of the item's lines (over the item's picture), so that it covers no line, with its top
+    // just below the hovered line (or its bottom just above it). Where that is too narrow, a tall popup may cover other
+    // items' lines, then the left end of a longer line of the hovered item; never the hovered line. Where it does not
+    // fit left of the hovered line (less than popupSideMinWidth px, or taller than the screen even in two columns), it
+    // is shown just below or above the hovered line instead.
+    popupSideGap: 8,               // px between the popup and the lines on its right
+    popupSideMinWidth: 260,        // px
+    itemLineGap: 40,               // px: lines further apart than this are of different items (see itemRows)
+    // a popup of several parts (the six Blood Shrine buffs) that is taller than the screen left of the lines, or
+    // (below or above the line) that fits neither below nor above the line, is shown in two columns
+    popupColumnsMaxWidth: 940,     // px (below or above the line)
+    popupColumnGap: 12,            // px between the two columns
     popupGap: 4,                   // px between the hovered line and the popup
     screenMargin: 8,               // px kept free at the screen edges
     hoverDelayMs: 80,              // wait before showing, so moving the mouse across lines does not flicker
     doneMessageMs: 4000,           // how long "Updated" stays on the button
+    historyMax: 200,               // updates kept in the update history (the oldest are dropped)
+    // the list of the names that an update no longer shows, and the update history (bottom right of the screen)
+    historyPanel: { width: 420, bottom: 52, listMaxHeight: 60 },   // px, px from the screen bottom, % of the screen height
     colors: {
       background: '#0d0d0d',
       border: '#6b5530',
@@ -52,21 +67,55 @@
     looseTemplateMaxUses: 20,      // a line form used by fewer cluster passives than this (e.g. "Adds {0}") is also used
                                    // by other mods, so it only shows a popup when the name is found
     keystoneNameMaxWords: 5,       // an English keystone line of this many words or fewer is only the name ("Avatar of Fire")
-    // Names found anywhere in a hovered line (keystones, skills). The lists come from checking every item line of
-    // the game data in both languages: these names are also other game words, so they would show the wrong effect.
+    // Names found anywhere in a hovered line (keystones, skills). A skill name that the English item text also writes
+    // in lower case ("ignite", "ambush") is an ordinary word there, so it is not looked for (on the Japanese page: the
+    // same skill's Japanese name). exclude and keep are the hand check of every item line of the data of 2026-11 in
+    // both languages; names that later data adds are decided by the rule alone, so these lists are not added to.
     nameScan: {
       minLength: { ja: 3, en: 3 },            // shorter names ("亀裂") are parts of other words
+      // also other game words, though not written in lower case (Blight: the league), so they would show the wrong effect
       exclude: {
         ja: ['ブライト', '感電領域', 'ポータル', 'アンブッシュ'],
         en: ['Blight', 'Ignite', 'Portal', 'Ambush', 'Reflection', 'Shocked Ground'],
       },
+      keep: { ja: [], en: [] },               // written in lower case too, but the item lines mean the skill
       // a name followed by one of these words is part of another game word ("Frenzy Charge", "Fireball Towers")
       notBefore: { ja: [], en: ['Charge', 'Charges', 'Tower', 'Towers', 'Encounter', 'Encounters', 'Scroll', 'Scrolls'] },
       // a name is not looked at in a line like this ("Power, Frenzy and Endurance Charges" are charges, not the skill)
       skipIf: { ja: {}, en: { Frenzy: '(Power|Endurance)(,| or| and)|(,| or| and) (Power|Endurance)' } },
-      reminderMinFixed: 4,                    // a reminder line form needs at least this many fixed letters
+      formMinFixed: 4,                        // a line form found by its names needs at least this many fixed letters
       // letters that may not touch a found name (so "フレンジー" is not found in "フレンジーチャージ")
       boundary: { ja: 'ァ-ヶー・A-Za-z', en: "A-Za-z'\\-" },
+    },
+    // Buffs, states, charges and grounds named in a line ("猛攻", "Onslaught"): the effects from the game's buff data.
+    // The Japanese name in the buff data can differ from the item text ("アーケーンサージ" / "アーケインサージ"), so the
+    // buff is found in the English text of the same line, on both pages.
+    buffScan: {
+      // A buff found by its English name is shown when the data marks it as shown in the game (not invisible), its
+      // English text says more than its name (at least minTextWords other words: "Frozen solid" does not), and the
+      // English item text never writes its name in lower case (an ordinary word: "on death"). A line naming
+      // "<family> buff" shows every buff named "<family> of ..." ("Gain a random Blood Shrine buff every 10 seconds";
+      // the ordinary "random Shrine buff" is not a family: the data does not say which shrines it gives).
+      // exclude and keep are the hand check of every item line of the data of 2026-11; names that later data adds are
+      // decided by these rules alone, so the lists are not added to.
+      minTextWords: 2,
+      textStopWords: ['you', 'are', 'been', 'being', 'have', 'has', 'had', 'the', 'and', 'your', 'from', 'with', 'while',
+        'when', 'its', 'that', 'this', 'for', 'not'],
+      // shown by the rules, but general words that are also a buff's name ("Fire Damage"), a text that only repeats the
+      // name ("Frozen": "凍結している"), or a text about something else ("Burning" is the burning from Herald of Ash)
+      exclude: [
+        'Critical Strike Chance', 'Critical Strike Multiplier', 'Fire Damage', 'Cold Damage', 'Lightning Damage', 'Fire',
+        'Attack and Cast Speed', 'Mana Cost', 'Converted', 'Death', 'Immunity', 'Imprisoned', 'Item Rarity', 'Light',
+        'Darkness', 'Stone', 'Blight', 'Tincture', 'Focused', 'Reflection', 'Ambush', 'Chained', 'Restore', 'Bark',
+        'Delirious', 'Insanity', 'Instability', 'Rats', 'Burning', 'Life Leech', 'Mana Leech', 'Energy Shield Leech',
+        'Life Regeneration', 'Mana Regeneration', 'Energy Shield Regeneration', 'Diamond Flask', 'Bismuth Flask',
+        'Amethyst Flask', 'Frozen', 'Ignited', 'Chilled', 'Poisoned', 'Petrified', 'Petrification', 'Stone Gaze',
+        'Ghost Shroud', 'Gale Force',
+      ],
+      // hidden by the rules, but the item lines mean the buff
+      keep: ['Rage', 'Taunted', 'Divine Charge', 'Desecrated Ground', 'Decay', 'Impale Effect', 'Union of Souls',
+        'Shrouded Shrine', 'Skeletal Shrine'],
+      minLength: 3,
     },
     // The POEDB button (always shown on the trade page; opens POEDB / POE2DB in a new tab)
     dbButton: {
@@ -155,8 +204,12 @@
       },
       repoeCommitApi: 'https://api.github.com/repos/repoe-fork/repoe-fork.github.io/commits?path=data&per_page=1',
       gggTagsApi: 'https://api.github.com/repos/grindinggear/skilltree-export/tags?per_page=100',
-      // skills granted by items; about 40 MB each, so only the page's language is downloaded
+      // skills granted by items; about 40 MB each. The Japanese page also downloads the English file, but keeps only
+      // the English names (they find the skills that the Japanese text names differently from the data).
       gems: { ja: REPOE1 + '/Japanese/gems.json', en: REPOE1 + '/gems.json' },
+      // buffs (猛攻, シュライン, ...); both pages use both: the English names, the Japanese texts (the Japanese page),
+      // and the Japanese names that the game's explanations of terms begin with ("凍結は、…", see pairLines)
+      buffs: { ja: REPOE1 + '/Japanese/buffs.json', en: REPOE1 + '/buffs.json' },
       gggDataUrl: (tag) =>'https://raw.githubusercontent.com/grindinggear/skilltree-export/' + encodeURIComponent(tag) + '/data.json',
     },
     poe2: {
@@ -180,12 +233,24 @@
       converting: 'データを変換中…',
       done: (n) => `更新しました(パッシブ ${n} 個)`,
       failed: (m) => `更新できませんでした: ${m}`,
+      menuHistory: '更新履歴を表示',
+      removedTitle: (n) => `今回の更新で表示されなくなった項目(${n} 件)`,
+      historyTitle: '更新履歴(表示されなくなった項目)',
+      historyEmpty: '表示されなくなった項目は、まだありません。',
+      historySave: 'ファイルに保存',
+      historyClose: '閉じる',
+      historyFile: 'MouseoverDetailViewer_更新履歴.txt',
+      historyFileTitle: 'Mouseover Detail Viewer 更新履歴(データの更新で表示されなくなった項目)',
+      kinds: { passive: 'パッシブ', skill: 'スキル', buff: 'バフ' },
+      pages: { ja: '日本語画面', en: '英語画面' },
       rateLimited: 'GitHub の回数上限に達しました。1時間ほど後に、もう一度押してください。',
       noData: '効果データがありません。画面右下の「効果データ ★」か、Tampermonkey のメニューの「データを更新」を押してください。',
       noJapanese: '日本語の文がありません(英語の文を表示しています)。',
       noJapaneseData: 'POE2 の日本語データは公開されていないため、日本語画面では表示できません。トレード画面を英語に切り替えると表示できます。',
       notFound: 'このパッシブの効果は、データの中に見つかりませんでした。',
       skillTitle: (n, l) => `${n}(レベル ${l})`,
+      // a name that the line does not write itself, with its English name ("残忍なシュライン(Brutal Shrine)")
+      withEnglish: (n, e) => `${n}(${e})`,
       skillNotFound: 'このスキルの効果は、データの中に見つかりませんでした。',
       dbOpen: 'POEDB を新しいタブで開きます(検索中のアイテムの種類のページ)',
       dbMove: 'ドラッグすると移動します',
@@ -202,12 +267,23 @@
       converting: 'Converting data…',
       done: (n) => `Updated (${n} passives)`,
       failed: (m) => `Could not update: ${m}`,
+      menuHistory: 'Show update history',
+      removedTitle: (n) => `No longer shown after this update (${n})`,
+      historyTitle: 'Update history (no longer shown)',
+      historyEmpty: 'Nothing has stopped being shown yet.',
+      historySave: 'Save to file',
+      historyClose: 'Close',
+      historyFile: 'MouseoverDetailViewer_update_history.txt',
+      historyFileTitle: 'Mouseover Detail Viewer update history (what a data update stopped showing)',
+      kinds: { passive: 'Passive', skill: 'Skill', buff: 'Buff' },
+      pages: { ja: 'Japanese page', en: 'English page' },
       rateLimited: 'GitHub request limit reached. Please try again in about an hour.',
       noData: 'No detail data yet. Click "Detail data ★" at the bottom right, or "Update data" in the Tampermonkey menu.',
       noJapanese: '',
       noJapaneseData: '',
       notFound: 'The effects of this passive were not found in the data.',
       skillTitle: (n, l) => `${n} (Level ${l})`,
+      withEnglish: (n) => n,
       skillNotFound: 'The effects of this skill were not found in the data.',
       dbOpen: 'Open POEDB in a new tab (the page of the item category being searched)',
       dbMove: 'Drag to move',
@@ -228,9 +304,10 @@
   const T = TEXT[LANG];
   const KEY_DATA = 'data_' + GAME;          // converted table
   const KEY_CHECK = 'check_' + GAME;        // { at: time of last check, latest: versions found }
+  const KEY_HISTORY = 'history';            // update history: [{ at, game, lang, items: [[kind, name]] }], newest first
   // The Version of the way the data is made; stored with the data, so data made by an older script is rebuilt.
   // Change it only when the conversion changes (a new Version that only changes the page does not ask for a rebuild).
-  const DATA_VERSION = '1.2.0';
+  const DATA_VERSION = '1.3.0.2';
 
   // ---------------------------------------------------------------------------
   // Download helpers
@@ -376,6 +453,52 @@
   const skeleton = (s) => s.replace(NUM, '#');
   const skeletonOfTemplate = (s) => s.replace(/[+-]?(\{\d+\}|\d+(?:\.\d+)?)/g, '#');
   const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // a line form with {0} holes -> a RegExp for the whole line (the spaces on the trade page can differ)
+  const formRx = (t) => new RegExp('^' + t.split(/\{\d+\}/).map((p) => escapeRe(p).replace(/\s+/g, '\\s*')).join('(.+?)') + '$', 'i');
+
+  // Finds names anywhere in a text, with the rules of CONFIG.nameScan for the language: letters that may not touch
+  // a name, words that may not follow it, and lines where a name is not looked at. Returns (text) => [names].
+  function nameFinder(names, L, rules) {
+    const S = rules || CONFIG.nameScan;
+    const list = [...new Set(names)].filter(Boolean).sort((a, b) => b.length - a.length).map(escapeRe);
+    if (!list.length) return () => [];
+    const b = S.boundary[L] || S.boundary.en;
+    const nb = (S.notBefore && S.notBefore[L]) || [];
+    const after = nb.length ? `(?!\\s+(?:${nb.map(escapeRe).join('|')})(?![A-Za-z]))` : '';
+    const rx = new RegExp(`(?<![${b}])(${list.join('|')})(?![${b}])${after}`, 'g');
+    const skipIf = (S.skipIf && S.skipIf[L]) || {};
+    return (text) => {
+      const out = [];
+      for (const m of text.matchAll(rx)) {
+        const n = m[1];
+        if (out.includes(n) || (skipIf[n] && new RegExp(skipIf[n]).test(text))) continue;
+        out.push(n);
+      }
+      return out;
+    };
+  }
+
+  // The names that the English item text also writes in lower case ("on death", "restore"): ordinary words there,
+  // so they are not looked for as names (CONFIG.nameScan, CONFIG.buffScan). Returns a Set of the names.
+  function ordinaryNames(enStat, names) {
+    const low = new Map();   // lower case -> the names
+    for (const n of names) {
+      const l = String(n || '').toLowerCase();
+      if (l.length < 3 || l === n) continue;
+      if (!low.has(l)) low.set(l, new Set());
+      low.get(l).add(n);
+    }
+    const out = new Set();
+    if (!low.size) return out;
+    const b = CONFIG.nameScan.boundary.en;
+    const rx = new RegExp(`(?<![${b}])(${[...low.keys()].sort((x, y) => y.length - x.length).map(escapeRe).join('|')})(?![${b}])`, 'g');
+    for (const e of enStat) {
+      for (const v of e.English || []) {
+        for (const m of stripMarkup(String(v.string || '')).matchAll(rx)) for (const n of low.get(m[1])) out.add(n);
+      }
+    }
+    return out;
+  }
 
   function buildReverse(enLists, jaIndex) {
     const bySkeleton = new Map();
@@ -526,7 +649,8 @@
   // for the same ids instead). Returns { ja: { line: entry }, en: { line: entry } }. A keystone that is not on the
   // tree (only on items) has no effect text in the data, so it gets a "not found" entry.
   function keystoneLines(enStat, jaStat, gggByName, jaByHash, en, toJapanese) {
-    const out = { ja: {}, en: {}, names: { ja: [], en: [] } };   // names: lines that are only a keystone's name
+    // names: lines that are only a keystone's name; nameMap: English name -> Japanese name of the same line
+    const out = { ja: {}, en: {}, names: { ja: [], en: [] }, nameMap: {} };
     const jaById = new Map();
     for (const e of jaStat) for (const id of e.ids) if (!jaById.has(id)) jaById.set(id, e);
     const keystoneNames = [...gggByName.values()].filter((n) => n.isKeystone).map((n) => n.name).sort((a, b) => b.length - a.length);
@@ -546,14 +670,19 @@
         if (!jv) return;
         const jline = normalize(stripMarkup(jv.string));
         if (!jline || /\{\d+\}/.test(jline)) return;
-        if (isName) out.names.ja.push(jline);
+        if (isName) {
+          out.names.ja.push(jline);
+          out.nameMap[line] = jline;
+        }
         let entry = node && jaByHash.get(node.skill);
         if (!entry && node) {
           // a newer keystone missing from RePoE's Japanese tree: turn the official English text into Japanese
           const r = englishLinesToJapanese(node.stats, toJapanese);
           entry = { n: jline, l: r.lines, r: unique(r.reminders.map(cleanJaReminder)), f: r.failed ? 1 : 0 };
         }
-        out.ja[jline] = entry || fromReminder(jline, jv.reminder_text, true);
+        const ent = entry || fromReminder(jline, jv.reminder_text, true);
+        if (name && !ent.e && name !== ent.n) ent.e = name;   // the English name (see partTitle)
+        out.ja[jline] = ent;
       });
     }
     return out;
@@ -572,14 +701,69 @@
   // ---------------------------------------------------------------------------
   // Line forms come from the item translations: most name the skill with markup "[ColdAegis::{0}|冷気のイージス]",
   // which gives the skill's id; the others are matched by the skill's shown name. {0} is the skill level.
-  // Returns { templates: [{ t, id }], skills: { id: { n, d, s: [lines], lv: { level: [lines] } } } }.
-  function buildSkills(statList, lang, gems) {
+  // The support gem's shown name ("投射物回帰サポート", "Returning Projectiles Support")
+  const supportName = (g) => stripMarkup(String(g.display_name || (g.base_item && g.base_item.display_name) || '')).trim();
+  // the name of a skill or support gem as it is looked for in a line
+  const scanName = (g) => stripMarkup(String((g.active_skill && g.active_skill.display_name) || (g.is_support && supportName(g)) || '')).trim();
+  // the name of a skill or support gem as its popup shows it (buildSkills)
+  const gemTitle = (g) => (g.active_skill ? stripMarkup(String(g.active_skill.display_name || '')) : supportName(g));
+
+  // Skill and support gem names of one language: { byName: active skill name -> id (granted skill lines),
+  // supports: support name -> id, scan: name -> id (names found anywhere in a line) }
+  // ordinary: the names that the English item text also writes in lower case (ordinaryNames); enOrdinary (the
+  // Japanese gems): the gem ids whose English name is one
+  function gemNames(gems, lang, ordinary, enOrdinary) {
     const byName = new Map();
     for (const [id, g] of Object.entries(gems)) {
       const n = g && g.active_skill && g.active_skill.display_name;
       if (n && !byName.has(n)) byName.set(n, id);
     }
+    // Support gems on items ("ソケットされたジェムはレベル20 投射物回帰サポートによってサポートされる",
+    // "Socketed Gems are Supported by Level 20 Returning Projectiles"). Most of these lines are not in the
+    // translations, so they are matched by TEXT.supportLine and the support's name. The English line leaves
+    // out the word "Support", so the name is stored with and without it.
+    const supports = {};   // name -> support gem id
+    for (const [id, g] of Object.entries(gems)) {
+      if (!g || !g.is_support || !g.support_gem || !g.per_level) continue;
+      const n = supportName(g);
+      if (!n) continue;
+      for (const k of unique([n, n.replace(/\s*(Support|サポート)$/i, '')])) {
+        if (!k) continue;
+        // the same name can belong to several ids; prefer the one that is a real gem item
+        const old = supports[k] && gems[supports[k]];
+        if (!old || (!old.base_item && g.base_item)) supports[k] = id;
+      }
+    }
+    // Skill names found anywhere in a line ("Herald of Thunder has 20% increased Mana Reservation Efficiency"):
+    // name -> gem id. Names that are also other game words (Blight: the league, Ignite: the ailment) are left out
+    // (see CONFIG.nameScan).
+    const L = lang === 'Japanese' ? 'ja' : 'en';
+    const exclude = new Set(CONFIG.nameScan.exclude[L]);
+    const keep = new Set(CONFIG.nameScan.keep[L] || []);
+    const scan = {};
+    const ordinaryIds = new Set();
+    for (const [id, g] of Object.entries(gems)) {
+      if (!g) continue;
+      const n = scanName(g);
+      if (n.length < CONFIG.nameScan.minLength[L] || exclude.has(n)) continue;
+      if (!keep.has(n) && (L === 'en' ? ordinary && ordinary.has(n) : enOrdinary && enOrdinary.has(id))) {
+        ordinaryIds.add(id);
+        continue;
+      }
+      const old = scan[n] && gems[scan[n]];
+      if (!old || (!old.base_item && g.base_item)) scan[n] = id;
+    }
+    return { byName, supports, scan, ordinaryIds };
+  }
+
+  // Returns { templates: [{ t, id }], skills: { id: { n, d, s: [lines], lv: { level: [lines] } } } }.
+  // names: gemNames() of the same gems. extra (the Japanese page, from pairLines): the skills and supports that the
+  // English text of the same line names, for the lines whose Japanese name differs from the data. enTitles (the
+  // Japanese page): gem id -> English name.
+  function buildSkills(statList, lang, gems, gn, extra, enTitles) {
+    const byName = gn.byName;
     const names = [...byName.keys()].sort((a, b) => b.length - a.length);
+    const statSkill = (extra && extra.statSkill) || new Map();
     const templates = [];
     const used = new Set();
     for (const e of statList) {
@@ -597,7 +781,9 @@
           // chance or a gem requirement ("requiring Level {0} or lower"); "DNT" texts are unused
           if (!/(Level|レベル)\s*\{0\}/.test(text) || /requiring Level|以下|^DNT/.test(text)) continue;
           const name = names.find((n) => text.includes(n));
-          id = name ? byName.get(name) : '';   // '' = the skill is not in the data; the popup says so
+          // a Japanese line can name the skill differently from the data: the skill named in the English line
+          const paired = statSkill.get(e.ids.join('|'));
+          id = name ? byName.get(name) : (paired && gems[paired] ? paired : '');   // '' = not in the data; the popup says so
         }
         const parts = text.split('\n');
         const at = parts.findIndex((p) => p.includes('{0}'));
@@ -605,38 +791,15 @@
         if (id) used.add(id);
       }
     }
-    // Support gems on items ("ソケットされたジェムはレベル20 投射物回帰サポートによってサポートされる",
-    // "Socketed Gems are Supported by Level 20 Returning Projectiles"). Most of these lines are not in the
-    // translations, so they are matched by TEXT.supportLine and the support's name. The English line leaves
-    // out the word "Support", so the name is stored with and without it.
-    const supports = {};   // name -> support gem id
-    const supportName = (g) => stripMarkup(String(g.display_name || (g.base_item && g.base_item.display_name) || '')).trim();
-    for (const [id, g] of Object.entries(gems)) {
-      if (!g || !g.is_support || !g.support_gem || !g.per_level) continue;
-      const n = supportName(g);
-      if (!n) continue;
-      for (const k of unique([n, n.replace(/\s*(Support|サポート)$/i, '')])) {
-        if (!k) continue;
-        // the same name can belong to several ids; prefer the one that is a real gem item
-        const old = supports[k] && gems[supports[k]];
-        if (!old || (!old.base_item && g.base_item)) supports[k] = id;
-      }
-    }
+    // support gems (see gemNames), and the support names that the Japanese lines write differently ("クルエルティ")
+    const supports = Object.assign({}, gn.supports);
+    for (const [n, id] of Object.entries((extra && extra.supportNames) || {})) if (!supports[n] && gems[id]) supports[n] = id;
     for (const id of Object.values(supports)) used.add(id);
 
-    // Skill names found anywhere in a line ("Herald of Thunder has 20% increased Mana Reservation Efficiency"):
-    // name -> gem id. Names that are also other game words (Blight: the league, Ignite: the ailment) are left out.
-    const L = lang === 'Japanese' ? 'ja' : 'en';
-    const exclude = new Set(CONFIG.nameScan.exclude[L]);
-    const scanNames = {};
-    for (const [id, g] of Object.entries(gems)) {
-      if (!g) continue;
-      const n = stripMarkup(String((g.active_skill && g.active_skill.display_name) || (g.is_support && supportName(g)) || '')).trim();
-      if (n.length < CONFIG.nameScan.minLength[L] || exclude.has(n)) continue;
-      const old = scanNames[n] && gems[scanNames[n]];
-      if (!old || (!old.base_item && g.base_item)) scanNames[n] = id;
-    }
+    const scanNames = gn.scan;
     const nameOnly = new Set(Object.values(scanNames).filter((id) => !used.has(id)));
+    // skills that only the English text of a Japanese line names
+    for (const id of (extra && extra.skillIds) || []) if (gems[id] && !used.has(id)) nameOnly.add(id);
 
     const clean = (s) => stripMarkup(String(s)).split('\n').map((x) => x.trim()).filter(Boolean);
     const texts = (o) => [].concat(...Object.values((o && o.stat_text) || {}).map(clean));
@@ -659,28 +822,412 @@
         s: texts(g.static),
         lv,
       };
+      // the English name, for a line that writes the skill differently (see partTitle)
+      const en = enTitles && enTitles.get(id);
+      if (en && en !== skills[id].n) skills[id].e = en;
     }
     return { templates, skills, supports, names: scanNames };
   }
 
-  // Item lines whose game text has a reminder ("ヒット時に敵を灰まみれにする" -> "(灰まみれの敵は…)"):
-  // [{ t: line with {0} holes, r: [reminder lines] }]. A form with too little fixed text ("{0}") is left out.
-  function reminderTemplates(statList, lang) {
-    const byText = new Map();
-    for (const e of statList) {
-      for (const v of e[lang] || []) {
-        if (!v.reminder_text || !v.string) continue;
-        let r = stripMarkup(String(v.reminder_text)).trim();
-        if (lang === 'Japanese') r = cleanJaReminder(r);
-        const rl = r.split('\n').map((x) => x.trim()).filter(Boolean);
-        for (const line of stripMarkup(v.string).split('\n')) {
-          const t = normalize(line);
-          if (t.replace(/\{\d+\}|[\s+\-%#]/g, '').length < CONFIG.nameScan.reminderMinFixed) continue;
-          byText.set(t, unique((byText.get(t) || []).concat(rl)));
+  // The game's explanations of its terms (the reminder texts of the item lines: "(Fortify: 堅牢化1につき…)"), by the
+  // term's English name, in each language: { ja: { term: [lines] }, en: { term: [lines] } }, the text that most lines
+  // use, in its parentheses; and lines: { ja: [{ t: line form, k: [terms] }], en: [...] }, the lines whose reminder
+  // names the terms. Only the Japanese texts name their terms; the English ones get the names of the Japanese ones of
+  // the same stat. A term that is a buff's name shows that buff, with the explanation under the buff's own text (see
+  // pairLines). A term without a name of its own ("回収", "直近") is not shown: the popup explains names.
+  function termTexts(jaStat, enStat) {
+    // the parts of a reminder text, one per term: "(Recently: …)\n(Life Leech: …)", a part can have several lines
+    const partsOf = (s) => {
+      const out = [];
+      for (const line of stripMarkup(String(s || '')).split('\n')) {
+        const x = line.trim();
+        if (!x) continue;
+        if (x.startsWith('(') || !out.length) out.push([x]);
+        else out[out.length - 1].push(x);
+      }
+      return out;
+    };
+    const nameOf = (part) => { const m = /^\(\s*([A-Za-z][A-Za-z0-9 '\-]*):/.exec(part[0]); return m ? m[1].trim() : ''; };
+    const body = (part, japanese) => part.map((x, i) => (i === 0 && japanese ? cleanJaReminder(x) : x).trim()).filter(Boolean);
+    const count = { ja: new Map(), en: new Map() };
+    const add = (lang, name, lines) => {
+      if (!name || !lines.length) return;
+      if (!count[lang].has(name)) count[lang].set(name, new Map());
+      const c = count[lang].get(name);
+      const key = JSON.stringify(lines);
+      c.set(key, (c.get(key) || 0) + 1);
+    };
+    // The lines that a reminder's terms belong to: the whole text, and a line of a longer text where no other stat has
+    // the same line ("移動スピードが{0}%減少する" is a line of the Hinder text and also a whole text of its own)
+    const linesOf = (s) => stripMarkup(String(s || '')).split('\n').map((x) => normalize(x)).filter(Boolean);
+    const owners = { ja: new Map(), en: new Map() };   // line form -> the stats that have it
+    for (const [lang, list, key] of [['ja', jaStat, 'Japanese'], ['en', enStat, 'English']]) {
+      for (const e of list) {
+        const k = e.ids.join('|');
+        for (const v of e[key] || []) for (const l of linesOf(v.string)) {
+          if (!owners[lang].has(l)) owners[lang].set(l, new Set());
+          owners[lang].get(l).add(k);
         }
       }
     }
-    return [...byText].map(([t, r]) => ({ t, r }));
+    const termLines = { ja: new Map(), en: new Map() };
+    const addLines = (lang, v, names) => {
+      names = names.filter(Boolean);
+      if (!names.length) return;
+      const ls = linesOf(v.string);
+      const forms = ls.length > 1 ? [ls.join(' '), ...ls.filter((l) => owners[lang].get(l).size === 1)] : ls;
+      for (const t of forms) {
+        if (!termLines[lang].has(t)) termLines[lang].set(t, new Set());
+        for (const n of names) termLines[lang].get(t).add(n);
+      }
+    };
+    const jaById = new Map();
+    for (const e of jaStat) {
+      jaById.set(e.ids.join('|'), e);
+      for (const v of e.Japanese || []) {
+        const parts = partsOf(v.reminder_text);
+        for (const p of parts) add('ja', nameOf(p), body(p, true));
+        addLines('ja', v, parts.map(nameOf));
+      }
+    }
+    for (const e of enStat) {
+      const je = jaById.get(e.ids.join('|'));
+      (e.English || []).forEach((v, vi) => {
+        const jv = je && je.Japanese && je.Japanese[vi];
+        const names = partsOf(jv && jv.reminder_text).map(nameOf);
+        const parts = partsOf(v.reminder_text);
+        if (parts.length !== names.length) return;
+        parts.forEach((p, i) => add('en', names[i], body(p, false)));
+        addLines('en', v, names);
+      });
+    }
+    const most = (m) => Object.fromEntries([...m].map(([name, c]) => [name, JSON.parse([...c].sort((a, b) => b[1] - a[1])[0][0])]));
+    const list = (m) => [...m].map(([t, k]) => ({ t, k: [...k] }));
+    return { ja: most(count.ja), en: most(count.en), lines: { ja: list(termLines.ja), en: list(termLines.en) } };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Buffs (猛攻, 堅牢化, シュライン, ...), and the names that the Japanese text writes differently from the data,
+  // found through the English text of the same line (the stat ids pair the two languages)
+  // ---------------------------------------------------------------------------
+  // A buff's popup entry: its name, the data's description, and its effect lines when every version of the buff
+  // has the same numbers (a shrine has player, monster and weaker versions). Several buffs can share a name
+  // ("出血" is also the stacking bleeding, "神聖領域" also the enemy's ground): the first one with a text is used.
+  // null when the data has no text.
+  function buffEntry(ids, src, english) {
+    const read = (data, id) => {
+      const b = data && data[id];
+      if (!b) return null;
+      const n = String(b.name || '').trim();
+      const d = [];
+      for (const x of String(b.description || '').split(/\r?\n/)) {
+        const t = stripMarkup(x).trim();
+        if (/\p{L}/u.test(t) && t !== n && !d.includes(t)) d.push(t);   // "@#%*)@#%*@^)" is not a text
+      }
+      const versions = Object.values(b.templates || {})
+        .map((tv) => JSON.stringify((tv.stat_text || []).map((s) => stripMarkup(String(s)).trim()).filter(Boolean)));
+      const l = versions.length && versions.every((v) => v === versions[0]) ? JSON.parse(versions[0]) : [];
+      return d.length || l.length ? { n, d, l, r: [] } : null;
+    };
+    for (const id of ids) {
+      let e = read(src, id);
+      if (!e && src !== english) {
+        e = read(english, id);   // the Japanese data has no text: the English text, with a note
+        if (e) e.f = 1;
+      }
+      if (!e) continue;
+      const en = String((english && english[id] && english[id].name) || '').trim();
+      if (!e.n) e.n = en;
+      // the Japanese page: the English name, for a line that writes the buff differently (see partTitle)
+      if (src !== english && en && en !== e.n) e.e = en;
+      return e;
+    }
+    return null;
+  }
+
+  // f: the downloaded files; data: convertPoe1's result; enNames / pageNames: gemNames() of the English gems and
+  // of the page's gems. Returns { lines: [{ t, b, s, k }] (line forms of the page's language; b: buff keys,
+  // s: skill ids, k: keystone names), buffs: { key: entry }, and for buildSkills (the Japanese page):
+  // statSkill: stat ids -> skill id, supportNames: name -> support gem id, skillIds: [ids] }.
+  function pairLines(f, data, enNames, pageNames, ordinary) {
+    const B = CONFIG.buffScan;
+    const ja = LANG === 'ja';
+    const enBuffs = f.enBuffs || {};
+    // the rules of CONFIG.buffScan: shown in the game, and an English text that says more than the name
+    const stop = new Set(B.textStopWords);
+    const stem = (w) => w.slice(0, 5);
+    const shown = (id) => {
+      const b = enBuffs[id];
+      if (!b || b.invisible) return false;
+      const own = new Set((String(b.name || '').toLowerCase().match(/[a-z]+/g) || []).map(stem));
+      const words = (stripMarkup(String(b.description || '')).toLowerCase().match(/[a-z]+/g) || [])
+        .filter((w) => w.length > 2 && !stop.has(w) && !own.has(stem(w)));
+      return words.length >= B.minTextWords;
+    };
+    // buffs by English name (several can share one: "Brutal Shrine"); a skill or keystone name is shown as that
+    const notBuff = new Set([...B.exclude, ...Object.keys(enNames.scan), ...((data.keystoneNames && data.keystoneNames.en) || [])]);
+    const keep = new Set(B.keep);
+    const byName = new Map();
+    for (const [id, b] of Object.entries(enBuffs)) {
+      const n = String((b && b.name) || '').trim();
+      if (n.length < B.minLength || notBuff.has(n)) continue;
+      if (!byName.has(n)) byName.set(n, []);
+      byName.get(n).push(id);
+    }
+    for (const [n, ids] of [...byName]) if (!keep.has(n) && (ordinary.has(n) || !ids.some(shown))) byName.delete(n);
+    // The game's explanation of the term that a buff is named after ("Fortify": "(堅牢化1につき…)"), which often has the
+    // numbers that the buff's own text ("ヒットにより受けるダメージが低下") does not: shown under the buff's own text, as
+    // the game shows it in item texts (the buff's own text can say other things: "バナーを設置することで勇猛を消費する").
+    // A term and a buff name are the same words, but for an ending of up to 3 letters ("Shock" / "Shocked", "Unnerved" /
+    // "Unnerve", "FireExposure" / "Fire Exposure"; not "Chill" / "Chilled Ground", not "FireExposure" / "Fire"); for a
+    // term without such a buff (the English words differ: "Freeze" / "Frozen"), its Japanese explanation begins with
+    // the buff's Japanese name ("凍結は、…") and the English names begin with the same letter.
+    const terms = (data.termTexts && data.termTexts[LANG]) || {};
+    const jaTerms = (data.termTexts && data.termTexts.ja) || {};
+    const words = (s) => String(s).toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 1);
+    const letters = (s) => String(s).toLowerCase().replace(/[^a-z]/g, '');
+    const sameWord = (term, name) => {
+      if (letters(term) === letters(name)) return true;
+      const tw = words(term), nw = words(name);
+      const alike = (a, b) => {
+        const [s, l] = a.length <= b.length ? [a, b] : [b, a];
+        return s === l || (s.length >= 3 && l.startsWith(s) && l.length - s.length <= 3);
+      };
+      return tw.length > 0 && tw.length === nw.length && tw.every((w, i) => alike(w, nw[i]));
+    };
+    const jaBuffData = f.jaBuffs || {};
+    const jaNameBegins = (term, id) => {
+      const n = String((jaBuffData[id] && jaBuffData[id].name) || '').trim();
+      const b = String((jaTerms[term] || [''])[0]).replace(/^\(/, '');
+      return !!n && b.startsWith(n) && !/^[\p{Script=Han}\p{Script=Katakana}ー]/u.test(b.slice(n.length));
+    };
+    // every buff shown in the game, by English name (also those that the words of a line do not find)
+    const allByName = new Map();
+    for (const [id, b] of Object.entries(enBuffs)) {
+      const n = String((b && b.name) || '').trim();
+      if (!n || b.invisible) continue;
+      if (!allByName.has(n)) allByName.set(n, []);
+      allByName.get(n).push(id);
+    }
+    const notBuffLetters = new Set([...notBuff].map(letters));
+    const termBuffs = new Map();   // term -> the names of its buffs
+    const buffsOfTerm = (term) => {
+      if (!termBuffs.has(term)) {
+        const out = [];
+        // a keystone or skill named in the reminder ("Avatar of Fire") is shown as that
+        if (!notBuffLetters.has(letters(term))) {
+          for (const n of allByName.keys()) if (sameWord(term, n)) out.push(n);
+          const tw = words(term);
+          if (!out.length && tw.length) {
+            for (const [n, ids] of allByName) {
+              const nw = words(n);
+              if (tw.length === nw.length && tw[0][0] === nw[0][0] && ids.some((id) => jaNameBegins(term, id))) out.push(n);
+            }
+          }
+        }
+        termBuffs.set(term, out);
+      }
+      return termBuffs.get(term);
+    };
+    const buffs = {};
+    // term: the term that names the buff in a line's reminder (see the reminder lines below)
+    const hasBuff = (key, ids, term) => {
+      if (!(key in buffs)) {
+        const name = key.split('|')[0];
+        const t = terms[term || ''] || terms[Object.keys(terms).find((x) => sameWord(x, name)) || ''];
+        let e = buffEntry(ids, ja ? f.jaBuffs : enBuffs, enBuffs);
+        // found only through a reminder: the buff's own text is shown only when the rules above show the buff
+        if (e && term && !byName.has(name)) { e.d = []; if (!e.l.length) delete e.f; }
+        if (!e && t) {
+          const jn = ids.map((id) => String((jaBuffData[id] && jaBuffData[id].name) || '').trim()).find(Boolean);
+          e = { n: (ja && jn) || name, d: [], l: [], r: [] };
+          if (ja && jn && jn !== name) e.e = name;
+        }
+        if (e && t) e.r = t.slice();
+        buffs[key] = e && (e.d.length || e.l.length || e.r.length) ? e : null;
+      }
+      return !!buffs[key];
+    };
+    // Several buffs can share a name ("Brutal Shrine": the shrine, and the weaker one of "You have Lesser Brutal
+    // Shrine Buff"). The line's own words choose: the buff whose id words ("shrine_lesser_brutal") are all in the
+    // English line, the one with the most of them (the first one, when it is as good as any).
+    const idWords = (id) => String(id).toLowerCase().split(/[^a-z]+/).filter(Boolean);
+    const pick = (key, enLine) => {
+      const ids = byName.get(key);
+      if (!ids || ids.length < 2) return { key, ids };
+      const words = new Set(String(enLine).toLowerCase().match(/[a-z]+/g) || []);
+      const score = (id) => { const w = idWords(id); return w.every((x) => words.has(x)) ? w.length : -1; };
+      let best = ids[0];
+      for (const id of ids) if (score(id) > score(best)) best = id;
+      return best === ids[0] ? { key, ids } : { key: key + '|' + best, ids: [best, ...ids.filter((x) => x !== best)] };
+    };
+    // "Power Charges" is also written "a Power Charge", "Gloom Shrine" also "Gloom Shrines"
+    const alias = new Map();
+    for (const n of byName.keys()) {
+      alias.set(n, n);
+      if (/ Charges$/.test(n)) alias.set(n.replace(/s$/, ''), n);
+      else if (!/s$/.test(n) && !byName.has(n + 's')) alias.set(n + 's', n);
+    }
+    const plain = { boundary: CONFIG.nameScan.boundary };
+    const findBuffs = nameFinder([...alias.keys()], 'en', plain);
+    // families: the buffs named "<family> of <member>" ("Blood Shrine of Rats"), found by "<family> buff(s)" in a line
+    const families = new Map();   // family -> member name -> ids
+    for (const [id, b] of Object.entries(enBuffs)) {
+      const m = /^(.+?) of (.+)$/.exec(String((b && b.name) || '').trim());
+      if (!m) continue;
+      if (!families.has(m[1])) families.set(m[1], new Map());
+      const family = families.get(m[1]);
+      if (!family.has(m[0])) family.set(m[0], []);
+      family.get(m[0]).push(id);
+    }
+    const groups = [];
+    for (const [word, family] of families) {
+      const members = [...family].filter(([, ids]) => ids.some(shown));
+      if (members.length > 1) groups.push({ find: nameFinder([word + ' buff', word + ' buffs'], 'en', plain), members });
+    }
+    // skills and keystones in the English text, found together as the English page finds them ("Lightning Conduit"
+    // is the skill, not the keystone "Conduit"); a buff inside one of these names is not a buff
+    const enKeystones = new Set((data.keystoneNames && data.keystoneNames.en) || []);
+    const findEnNames = nameFinder([...Object.keys(enNames.scan), ...enKeystones], 'en');
+    // the Japanese page: those that the Japanese text does not name itself are added through the English text
+    const kmap = data.keystoneNameMap || {};
+    const findOwn = ja ? nameFinder([...Object.keys(pageNames.scan), ...((data.keystoneNames && data.keystoneNames.ja) || [])], 'ja') : () => [];
+    const jaById = new Map();
+    if (ja) for (const e of f.jaStat) { const k = e.ids.join('|'); if (!jaById.has(k)) jaById.set(k, e); }
+
+    const forms = new Map();   // line form -> { b, s, k }
+    const statSkill = new Map();
+    const supportNames = {};
+    const skillIds = new Set();
+    // what one English line names: the buffs, and (the Japanese page) the skills and keystones that the Japanese line
+    // does not name itself
+    const namesIn = (enLine, pageLine) => {
+      const found = findEnNames(enLine);
+      let masked = enLine;
+      for (const n of found) masked = masked.split(n).join(' '.repeat(n.length));
+      const b = [];
+      for (const n of findBuffs(masked)) {
+        const p = pick(alias.get(n), enLine);
+        if (!b.includes(p.key) && hasBuff(p.key, p.ids)) b.push(p.key);
+      }
+      for (const g of groups) {
+        if (b.length || !g.find(masked).length) continue;
+        for (const [key, ids] of g.members) if (!b.includes(key) && hasBuff(key, ids)) b.push(key);
+      }
+      if (!ja) return { b, s: [], k: [] };
+      const own = findOwn(pageLine);
+      const ownIds = new Set(own.map((n) => pageNames.scan[n]).filter(Boolean));
+      // a keystone wins over a skill of the same name (as on the page)
+      const s = found.filter((n) => !enKeystones.has(n)).map((n) => enNames.scan[n]).filter((id) => id && !ownIds.has(id));
+      const k = found.filter((n) => enKeystones.has(n)).map((n) => kmap[n]).filter((n) => n && !own.includes(n));
+      return { b, s, k };
+    };
+    const add = (line, { b, s, k }) => {
+      if (!b.length && !s.length && !k.length) return;
+      const t = normalize(line);
+      // a form made mostly of numbers ("+{0}%") would match other lines; a line without numbers is matched whole
+      if (/\{\d+\}/.test(t) && t.replace(/\{\d+\}|[\s+\-%#]/g, '').length < CONFIG.nameScan.formMinFixed) return;
+      const x = forms.get(t) || { b: [], s: [], k: [] };
+      for (const v of b) if (!x.b.includes(v)) x.b.push(v);
+      for (const v of s) if (!x.s.includes(v)) x.s.push(v);
+      for (const v of k) if (!x.k.includes(v)) x.k.push(v);
+      forms.set(t, x);
+      for (const id of s) skillIds.add(id);
+    };
+    for (const e of f.enStat) {
+      const key = e.ids.join('|');
+      const je = ja ? jaById.get(key) : null;
+      (e.English || []).forEach((v, vi) => {
+        const en = stripMarkup(String(v.string || ''));
+        if (!en) return;
+        const enLines = en.split('\n');
+        let pageText = en;
+        if (ja) {
+          const jv = je && je.Japanese && (je.Japanese[vi] || je.Japanese[0]);
+          if (!jv) return;
+          pageText = stripMarkup(String(jv.string || ''));
+          // the skill of a granted skill line whose Japanese name differs from the data (see buildSkills)
+          const whole = namesIn(enLines.join(' '), pageText.split('\n').join(' '));
+          if (whole.s.length && !statSkill.has(key)) statSkill.set(key, whole.s[0]);
+          for (const id of whole.s) skillIds.add(id);
+          // support gems: the markup gives the gem ("[SupportBonespire<gemlevel={0}>|ボーンスパイア]"), or the English
+          // line its English name ("クルエルティ" / "Cruelty")
+          for (const m of String(jv.string || '').matchAll(/\[(Support[A-Za-z0-9_]+)(?:<[^\]|]*>)?\|([^\]]+)\]/g)) supportNames[m[2].trim()] = m[1];
+          const mj = TEXT.ja.supportLine.exec(normalize(pageText.replace(/\{\d+\}/g, '1')));
+          const me = TEXT.en.supportLine.exec(normalize(en.replace(/\{\d+\}/g, '1')));
+          const sid = me && enNames.supports[normalize(me[2])];
+          if (mj && sid && !supportNames[normalize(mj[2])]) supportNames[normalize(mj[2])] = sid;
+        }
+        // A text of several lines: the whole text as one line (the trade page can show it so), and line by line when
+        // both languages have the same number of lines (the names of one line are not put on another line, which
+        // other mods can share). A buff goes to the line that writes its name ("猛攻"), as the languages can order
+        // the lines differently.
+        const pageLines = pageText.split('\n');
+        const joined = pageLines.join(' ');
+        if (pageLines.length > 1 || enLines.length > 1) add(joined, namesIn(enLines.join(' '), joined));
+        if (pageLines.length !== enLines.length) return;
+        const per = pageLines.map((pl, i) => namesIn(enLines[i], pl));
+        for (let i = 0; i < per.length && per.length > 1; i++) {
+          per[i].b = per[i].b.filter((bk) => {
+            const n = buffs[bk] && buffs[bk].n;
+            if (!n || pageLines[i].includes(n)) return true;
+            const at = pageLines.findIndex((pl) => pl.includes(n));
+            if (at < 0) return true;
+            if (!per[at].b.includes(bk)) per[at].b.push(bk);
+            return false;
+          });
+        }
+        pageLines.forEach((pl, i) => add(pl, per[i]));
+      });
+    }
+    // the buffs that the game's reminder of a line names by its term, also where the line's English words name it
+    // another way ("Cover Enemies in Ash on Hit": "(Covered in Ash: 灰まみれは…)")
+    // (not a second buff of a name that the line already shows: "堅牢化" is both Fortify and Fortification)
+    for (const { t, k } of (data.termTexts && data.termTexts.lines && data.termTexts.lines[LANG]) || []) {
+      const have = new Set(((forms.get(normalize(t)) || {}).b || []).map((key) => buffs[key] && buffs[key].n));
+      const b = [];
+      for (const term of k) {
+        for (const n of buffsOfTerm(term)) {
+          if (b.includes(n) || !hasBuff(n, allByName.get(n), term) || have.has(buffs[n].n)) continue;
+          have.add(buffs[n].n);
+          b.push(n);
+        }
+      }
+      add(t, { b, s: [], k: [] });
+    }
+    const lines = [];
+    const used = {};
+    for (const [t, x] of forms) {
+      const o = { t };
+      if (x.b.length) o.b = x.b;
+      if (x.s.length) o.s = x.s;
+      if (x.k.length) o.k = x.k;
+      for (const key of x.b) used[key] = buffs[key];
+      lines.push(o);
+    }
+    return { lines, buffs: used, statSkill, supportNames, skillIds: [...skillIds] };
+  }
+
+  // Fixed item lines that only look like a passive's line ("1 Added Passive Skill is a Jewel Socket"):
+  // the popup does not say "not found" for them
+  function notPassiveNames(statList, lang, templates, names) {
+    const forms = templates.filter((x) => !x.loose).map((x) => formRx(x.t));
+    const known = new Set(Object.keys(names).map((n) => n.toLowerCase()));
+    const out = new Set();
+    for (const e of statList) {
+      for (const v of e[lang] || []) {
+        const s = stripMarkup(String(v.string || ''));
+        if (/\{\d+\}/.test(s)) continue;
+        for (const line of unique([s, ...s.split('\n')])) {
+          const t = normalize(line);
+          for (const rx of forms) {
+            const m = rx.exec(t);
+            if (m && !known.has(normalize(m[1]).toLowerCase())) { out.add(t); break; }
+          }
+        }
+      }
+    }
+    return [...out];
   }
 
   function convertPoe1(f, versions) {
@@ -694,7 +1241,9 @@
       const r = nodeRank(n.isKeystone, n.isNotable, !!n.ascendancyName);
       const lines = [];
       for (const s of n.stats) for (const l of stripMarkup(s).split('\n')) if (l.trim()) lines.push(l);
-      addEntry(en, enRank, n.name, { n: n.name, l: lines, r: (n.reminderText || []).map(stripMarkup) }, r);
+      const entry = { n: n.name, l: lines, r: (n.reminderText || []).map(stripMarkup) };
+      if (r < 2) entry.small = 1;   // no item line names a small passive (see removedNames)
+      addEntry(en, enRank, n.name, entry, r);
       const old = gggByName.get(n.name);
       if (!old || nodeRank(old.isKeystone, old.isNotable, !!old.ascendancyName) < r) gggByName.set(n.name, n);
     }
@@ -719,7 +1268,10 @@
         }
       }
       entry.r = mergeReminders(entry.r, p.reminder_text);
-      addEntry(ja, jaRank, p.name, entry, nodeRank(p.is_keystone, p.is_notable, !!p.ascendancy));
+      const rank = nodeRank(p.is_keystone, p.is_notable, !!p.ascendancy);
+      if (rank < 2) entry.small = 1;
+      else if (g && g.name && g.name !== p.name) entry.e = g.name;   // the English name (see partTitle)
+      addEntry(ja, jaRank, p.name, entry, rank);
       if (entry.l.length) jaByHash.set(p.hash, entry);
     }
 
@@ -730,37 +1282,56 @@
     const enClusterPairs = [];
     let clusterTotal = 0;
     let clusterJapaneseMissing = 0;
+    const jaOtherName = [];   // notables whose item line names them differently ("ボディーガード" / "ボディガード")
     for (const x of f.jaCluster) {
       clusterTotal++;
       const enName = enNameById.get(x.id);
       const je = jaIndex.get(x.jewel_stat);
       const ee = enStatById.get(x.jewel_stat);
-      if (je && je.Japanese && je.Japanese[0]) jaClusterPairs.push({ text: stripMarkup(je.Japanese[0].string), name: x.name });
+      const jtext = je && je.Japanese && je.Japanese[0] ? stripMarkup(je.Japanese[0].string) : '';
+      if (jtext) jaClusterPairs.push({ text: jtext, name: x.name });
       if (ee && ee.English && ee.English[0]) enClusterPairs.push({ text: stripMarkup(ee.English[0].string), name: enName });
       const node = gggByName.get(enName);
       if (!node) continue;
       const r = englishLinesToJapanese(node.stats, toJapanese);
       if (r.failed) clusterJapaneseMissing++;
-      addEntry(ja, jaRank, x.name, { n: x.name, l: r.lines, r: r.reminders, f: r.failed ? 1 : 0 }, 2);
+      const entry = { n: x.name, l: r.lines, r: r.reminders, f: r.failed ? 1 : 0 };
+      if (enName && enName !== x.name) entry.e = enName;
+      addEntry(ja, jaRank, x.name, entry, 2);
+      if (jtext && !jtext.includes(x.name)) jaOtherName.push({ text: jtext, entry });
+    }
+    // take the name from the item line, with the line form that the other notables use
+    const clusterForms = unique(jaClusterPairs.filter((p) => p.text.includes(p.name)).map((p) => p.text.split(p.name).join('{0}')));
+    for (const { text, entry } of jaOtherName) {
+      for (const t of clusterForms) {
+        const m = formRx(t).exec(text);
+        if (!m) continue;
+        const name = normalize(m[1]);
+        addEntry(ja, jaRank, name, Object.assign({}, entry, { n: name }), 2);
+        break;
+      }
     }
     // the game shows each reminder once, even when several lines name the same word ("Arcane Surge")
     for (const entry of Object.values(ja)) entry.r = unique(entry.r.map(cleanJaReminder));
     const kl = keystoneLines(f.enStat, f.jaStat, gggByName, jaByHash, en, toJapanese);
     const lines = { ja: kl.ja, en: kl.en };
     const keystoneNames = { ja: unique(kl.names.ja), en: unique(kl.names.en) };
-    const reminders = { ja: reminderTemplates(f.jaStat, 'Japanese'), en: reminderTemplates(f.enStat, 'English') };
+    const terms = termTexts(f.jaStat, f.enStat);
+    const templates = {
+      ja: passiveTemplates([f.jaStatPassive, f.jaStatAura, f.jaStat], 'Japanese', jaClusterPairs),
+      en: passiveTemplates(enLists, 'English', enClusterPairs),
+    };
 
     return {
       versions,
       builtAt: Date.now(),
-      templates: {
-        ja: passiveTemplates([f.jaStatPassive, f.jaStatAura, f.jaStat], 'Japanese', jaClusterPairs),
-        en: passiveTemplates(enLists, 'English', enClusterPairs),
-      },
+      templates,
       names: { ja, en },
       lines,
       keystoneNames,
-      reminders,
+      notNames: { ja: notPassiveNames(f.jaStat, 'Japanese', templates.ja, ja), en: notPassiveNames(f.enStat, 'English', templates.en, en) },
+      keystoneNameMap: kl.nameMap,   // used by pairLines, not kept
+      termTexts: terms,              // used by pairLines, not kept
       counts: { ja: Object.keys(ja).length, en: Object.keys(en).length, clusterTotal, clusterJapaneseMissing },
     };
   }
@@ -772,8 +1343,10 @@
     for (const p of Object.values(f.tree.passives)) {
       if (!p.name || !p.stats) continue;
       const r = translateStats(p.stats, index, 'English', f.handlers);
-      addEntry(en, rank, p.name, { n: p.name, l: r.lines, r: mergeReminders(r.reminders, p.reminder_text) },
-        nodeRank(p.is_keystone, p.is_notable, !!p.ascendancy));
+      const k = nodeRank(p.is_keystone, p.is_notable, !!p.ascendancy);
+      const entry = { n: p.name, l: r.lines, r: mergeReminders(r.reminders, p.reminder_text) };
+      if (k < 2) entry.small = 1;   // no item line names a small passive (see removedNames)
+      addEntry(en, rank, p.name, entry, k);
     }
     return {
       versions,
@@ -788,6 +1361,87 @@
   // Update
   // ---------------------------------------------------------------------------
   let updating = false;
+  // The names that the data in use showed on the trade site and the new data cannot show (this page's game and
+  // language), for the list after an update and the update history: [[kind, name]]. A part that the old data does
+  // not have (made by an older Version) is not compared. Shown: a passive that is not a small one (no item line
+  // names a small passive), and a skill or buff that a line really shows with the data in use (see shownBefore; a
+  // skill kept in the data for a line that shows something else was never shown). lines(): the item lines.
+  const KIND_ORDER = { passive: 0, skill: 1, buff: 2 };
+  function removedNames(old, data, lines) {
+    if (!old) return [];
+    // all: the new data (every name it has, so a name that it still has is not listed)
+    const parts = (d, all) => {
+      const out = {};
+      const add = (kind, part, names) => { if (part || all) out[kind] = new Set(part ? names() : []); };
+      const pn = d.names && d.names[LANG];
+      add('passive', pn, () => Object.keys(pn).filter((n) => all || !(pn[n] && pn[n].small)));
+      const sk = d.skills && d.skills[LANG];
+      add('skill', sk, () => Object.values(sk.skills || {}).map((s) => s && s.n).filter(Boolean));
+      const bf = d.buffs && d.buffs[LANG];
+      add('buff', bf, () => Object.values(bf).map((b) => b && b.n).filter(Boolean));
+      return out;
+    };
+    const before = parts(old, false);
+    const now = parts(data, true);
+    let out = [];
+    for (const [kind, names] of Object.entries(before)) for (const n of names) if (!now[kind].has(n)) out.push([kind, n]);
+    const check = out.filter(([kind]) => kind !== 'passive');
+    if (check.length) {
+      const seen = shownBefore(check, old, lines);
+      out = out.filter(([kind, n]) => kind === 'passive' || seen.has(kind + '\t' + n));
+    }
+    return out.sort((a, b) => KIND_ORDER[a[0]] - KIND_ORDER[b[0]] || a[1].localeCompare(b[1], LANG));
+  }
+
+  // Which of these skills and buffs ([[kind, name]]) the data in use (old, the one loadTable loaded) shows on a line:
+  // a support gem is shown by its "Supported by" line; the others are looked up as the popup does, on the item lines
+  // that write the names and on the line forms that name them through the English text or grant the skill.
+  // Returns a Set of "kind\tname".
+  function shownBefore(items, old, lines) {
+    const want = new Set(items.map(([kind, n]) => kind + '\t' + n));
+    const seen = new Set();
+    const sk = (old.skills && old.skills[LANG]) || {};
+    const skills = sk.skills || {};
+    const ids = new Set(Object.keys(skills).filter((id) => skills[id] && want.has('skill\t' + skills[id].n)));
+    for (const id of Object.values(sk.supports || {})) if (ids.has(id)) seen.add('skill\t' + skills[id].n);
+    const bf = (old.buffs && old.buffs[LANG]) || {};
+    const keys = new Set(Object.keys(bf).filter((k) => bf[k] && want.has('buff\t' + bf[k].n)));
+    const test = new Set();
+    for (const p of (old.pairs && old.pairs[LANG]) || []) {
+      if ((p.s || []).some((id) => ids.has(id)) || (p.b || []).some((k) => keys.has(k))) test.add(p.t.replace(/\{\d+\}/g, '1'));
+    }
+    for (const x of sk.templates || []) if (ids.has(x.id)) test.add(x.t.replace(/\{\d+\}/g, '1'));
+    const names = items.map(([, n]) => n);
+    for (const l of lines()) if (names.some((n) => l.includes(n))) test.add(l);
+    for (const l of test) {
+      const r = lookup(l);
+      for (const part of r ? (r.multi || [r]) : []) {
+        const src = SOURCE.get(part);
+        if (src && want.has(src[0] + '\t' + src[1])) seen.add(src[0] + '\t' + src[1]);
+      }
+    }
+    return seen;
+  }
+
+  // The item lines of the game data as the trade site shows them (a number in each hole), whole and line by line
+  function itemLines(statList, lang) {
+    const out = new Set();
+    for (const e of statList || []) {
+      for (const v of e[lang] || []) {
+        const s = stripMarkup(String(v.string || '')).replace(/\{\d+(?::[^}]*)?\}/g, '1');
+        if (s.includes('\n')) out.add(normalize(s));
+        for (const x of s.split('\n')) { const t = normalize(x); if (t) out.add(t); }
+      }
+    }
+    return [...out];
+  }
+
+  function addHistory(items) {
+    const list = GM_getValue(KEY_HISTORY, []);
+    list.unshift({ at: Date.now(), game: GAME, lang: LANG, items });
+    GM_setValue(KEY_HISTORY, list.slice(0, CONFIG.historyMax));
+  }
+
   async function updateData() {
     if (updating) return;
     updating = true;
@@ -795,36 +1449,69 @@
       showButton(T.downloading(0, 1), true);
       const versions = await fetchLatestVersions(GAME);
       const files = Object.assign({}, SOURCES[GAME].files);
-      if (GAME === 'poe1') files.ggg = SOURCES.poe1.gggDataUrl(versions.ggg);
+      if (GAME === 'poe1') {
+        files.ggg = SOURCES.poe1.gggDataUrl(versions.ggg);
+        files.enBuffs = SOURCES.poe1.buffs.en;
+        files.jaBuffs = SOURCES.poe1.buffs.ja;
+      }
       const keys = Object.keys(files);
-      const total = keys.length + (GAME === 'poe1' ? 1 : 0);
+      // the skills: the English file (the Japanese page keeps only its names), then the page's file
+      const gemFiles = GAME === 'poe1' ? (LANG === 'ja' ? ['en', 'ja'] : ['en']) : [];
+      const total = keys.length + gemFiles.length;
       const got = {};
       for (let i = 0; i < keys.length; i++) {
         showButton(T.downloading(i + 1, total), true);
         got[keys[i]] = await getJson(files[keys[i]]);
       }
       let gems = null;
-      if (GAME === 'poe1') {
-        showButton(T.downloading(total, total), true);
-        gems = await getJson(SOURCES.poe1.gems[LANG]);
+      let enNames = null;
+      let enTitles = null;
+      let ordinary = new Set();
+      for (let i = 0; i < gemFiles.length; i++) {
+        showButton(T.downloading(keys.length + i + 1, total), true);
+        gems = null;   // about 40 MB each: let the English file go before the Japanese one comes
+        gems = await getJson(SOURCES.poe1.gems[gemFiles[i]]);
+        if (gemFiles[i] === 'en') {
+          // the skill and buff names that the English item text also writes in lower case
+          const names = [...Object.values(gems).filter(Boolean).map(scanName),
+            ...Object.values(got.enBuffs || {}).map((b) => String((b && b.name) || '').trim())];
+          ordinary = ordinaryNames(got.enStat, names);
+          enNames = gemNames(gems, 'English', ordinary);
+          // the English names of the skills, for the Japanese page's popups (see partTitle)
+          if (LANG === 'ja') enTitles = new Map(Object.entries(gems).filter(([, g]) => g).map(([id, g]) => [id, gemTitle(g)]));
+        }
       }
       showButton(T.converting, true);
       await new Promise((r) => setTimeout(r, 30));
       const data = GAME === 'poe1' ? convertPoe1(got, versions) : convertPoe2(got, versions);
+      const old = GM_getValue(KEY_DATA, null);
+      const lang = LANG === 'ja' ? 'Japanese' : 'English';
+      const statList = LANG === 'ja' ? got.jaStat : got.enStat;
       if (gems) {
-        // keep the other language's skills from before; they are rebuilt when that page updates
-        const old = GM_getValue(KEY_DATA, null);
-        data.skills = Object.assign({}, old && old.skills, {
-          [LANG]: buildSkills(LANG === 'ja' ? got.jaStat : got.enStat, LANG === 'ja' ? 'Japanese' : 'English', gems),
+        const pageNames = LANG === 'ja' ? gemNames(gems, lang, ordinary, enNames.ordinaryIds) : enNames;
+        const pairs = pairLines(got, data, enNames, pageNames, ordinary);
+        // keep the other language's parts from before (made by this Version); they are rebuilt when that page updates
+        const keep = old && old.scriptVersion === DATA_VERSION ? old : {};
+        data.skills = Object.assign({}, keep.skills, {
+          [LANG]: buildSkills(statList, lang, gems, pageNames, pairs, enTitles),
         });
+        data.pairs = Object.assign({}, keep.pairs, { [LANG]: pairs.lines });
+        data.buffs = Object.assign({}, keep.buffs, { [LANG]: pairs.buffs });
         gems = null;
       }
+      delete data.keystoneNameMap;
+      delete data.termTexts;
       data.scriptVersion = DATA_VERSION;
+      const removed = removedNames(old, data, () => itemLines(statList, lang));
       GM_setValue(KEY_DATA, data);
       GM_setValue(KEY_CHECK, { at: Date.now(), latest: versions });
       loadTable();
       showButton(T.done(data.counts[LANG] || data.counts.en), true);
       setTimeout(hideButton, CONFIG.doneMessageMs);
+      if (removed.length) {
+        addHistory(removed);
+        showList(T.removedTitle(removed.length), [{ items: removed }]);
+      }
     } catch (e) {
       console.error('[Mouseover Detail Viewer]', e);
       showButton(e.rateLimited ? T.rateLimited : T.failed(e.message), false);
@@ -836,10 +1523,10 @@
   async function dailyCheck() {
     const data = GM_getValue(KEY_DATA, null);
     if (!data) { showButton(T.buttonFirst, false); return; }
-    // the skills are downloaded for one language at a time
-    if (GAME === 'poe1' && !(data.skills && data.skills[LANG])) { showButton(T.buttonFirst, false); return; }
     // the data was made by an older way of making it
     if (data.scriptVersion !== DATA_VERSION) { showButton(T.buttonNew, false); return; }
+    // the skills and buffs are made for one language at a time
+    if (GAME === 'poe1' && !(data.skills && data.skills[LANG] && data.pairs && data.pairs[LANG])) { showButton(T.buttonFirst, false); return; }
     const check = GM_getValue(KEY_CHECK, null);
     const due = !check || Date.now() - check.at > CONFIG.checkIntervalHours * 3600 * 1000;
     let latest = check && check.latest;
@@ -864,16 +1551,21 @@
   let lineTable = {};      // whole line text -> entry (keystone lines)
   let skillTable = {};     // skill id -> skill (skills granted by items)
   let supportTable = {};   // support gem name -> skill id (support gems on items)
-  let nameRx = null;       // finds keystone and skill names anywhere in a line
+  let findNames = () => []; // finds keystone and skill names anywhere in a line
   let nameKinds = {};      // name -> { k: keystone entry } | { s: skill id }
-  let reminderMatchers = []; // [{ rx, r }] lines whose game text has a reminder
+  // [{ rx, b, s, k }] lines whose English text names a buff, or (Japanese page) a skill or keystone that the
+  // Japanese text names differently from the data
+  let pairMatchers = [];
+  let buffTable = {};      // buff key -> entry
+  let notNames = new Set(); // fixed lines that only look like a passive's line
   const cache = new Map(); // line text -> entry | null
+  const SOURCE = new WeakMap(); // popup entry -> [kind, name] of the skill or buff that it shows (see shownBefore)
 
   function loadTable() {
     cache.clear();
     if (typeof hidePopup === 'function' && popup) hidePopup();   // the shown text may be from before the update
     const data = GM_getValue(KEY_DATA, null);
-    nameRx = null; nameKinds = {}; reminderMatchers = [];
+    findNames = () => []; nameKinds = {}; pairMatchers = []; buffTable = {}; notNames = new Set();
     if (!data) { table = null; lineTable = {}; skillTable = {}; supportTable = {}; matchers = []; return; }
     table = data.names[LANG] || {};
     lineTable = (data.lines && data.lines[LANG]) || {};
@@ -887,17 +1579,11 @@
       const e = lineTable[n] || table[n];
       if (e && !e.missing) nameKinds[n] = { k: e };
     }
-    const S = CONFIG.nameScan;
-    const scanList = Object.keys(nameKinds).sort((a, b) => b.length - a.length).map(escapeRe);
-    if (scanList.length) {
-      const b = S.boundary[LANG] || S.boundary.en;
-      const after = (S.notBefore[LANG] || []).length ? `(?!\\s+(?:${S.notBefore[LANG].map(escapeRe).join('|')})(?![A-Za-z]))` : '';
-      nameRx = new RegExp(`(?<![${b}])(${scanList.join('|')})(?![${b}])${after}`, 'g');
-    }
-    reminderMatchers = ((data.reminders && data.reminders[LANG]) || []).map(({ t, r }) => ({
-      rx: new RegExp('^' + t.split(/\{\d+\}/).map((p) => escapeRe(p).replace(/\s+/g, '\\s*')).join('(.+?)') + '$', 'i'),
-      r,
-    }));
+    findNames = nameFinder(Object.keys(nameKinds), LANG);
+    pairMatchers = ((data.pairs && data.pairs[LANG]) || []).map(({ t, b, s, k }) => ({ rx: formRx(t), b, s, k }));
+    buffTable = (data.buffs && data.buffs[LANG]) || {};
+    for (const b of Object.values(buffTable)) if (b && typeof b === 'object') SOURCE.set(b, ['buff', b.n]);
+    notNames = new Set((data.notNames && data.notNames[LANG]) || []);
     // strict forms first, and longer forms first ("Allocates {0} if you have ... Forbidden Flesh" before "Allocates {0}")
     const list = (data.templates[LANG] || []).map((x) => ({ t: x.t, loose: x.loose, skill: null }))
       .concat(sk.templates.map((x) => ({ t: x.t, loose: false, skill: x.id })))
@@ -916,7 +1602,10 @@
     // the exact level, or the nearest level the data has
     let use = levels.filter((x) => x <= level).pop();
     if (use == null) use = levels[0];
-    return { n: T.skillTitle(s.n, level), d: s.d, l: s.s.concat(use != null ? s.lv[use] : []), r: [] };
+    // b: the name without the level, e: the English name (see partTitle)
+    const out = { n: T.skillTitle(s.n, level), b: s.n, e: s.e, d: s.d, l: s.s.concat(use != null ? s.lv[use] : []), r: [] };
+    SOURCE.set(out, ['skill', s.n]);
+    return out;
   }
 
   const normalize = (s) => s.replace(/\s+/g, ' ').trim();
@@ -940,7 +1629,8 @@
       cache.set(text, result);
       return result;
     }
-    for (const { rx, loose, skill } of matchers) {
+    // a fixed line that only looks like a passive's line ("1 Added Passive Skill is a Jewel Socket") skips the forms
+    for (const { rx, loose, skill } of notNames.has(normalize(text)) ? [] : matchers) {
       const m = rx.exec(text);
       if (!m) continue;
       if (skill != null) {
@@ -952,36 +1642,37 @@
       if (found) { result = found; break; }
       if (!loose) { result = { n: name, l: [], r: [], missing: true }; break; }
     }
-    if (!result) result = findNamesAndReminders(normalize(text));
+    if (!result) result = findNamesInLine(normalize(text));
     cache.set(text, result);
     return result;
   }
 
-  // Any other line: the keystones and skills named in it, and the game's reminder for the line's form.
-  // ("召喚したスケルトンはアバターオブファイヤーを持つ", "ヘラルドオブサンダーのマナリザーブ効率が20%増加する")
-  function findNamesAndReminders(text) {
+  // Any other line: the keystones and skills named in it, and the buffs that its English text names
+  // ("召喚したスケルトンはアバターオブファイヤーを持つ", "ヘラルドオブサンダーのマナリザーブ効率が20%増加する",
+  // "ソケットされたゴーレムスキルをキャスト時に猛攻を10秒間獲得する"). Only names are explained: the game's reminder of a
+  // line ("(ヒットによるダメージのみが…回収できる)") is not shown alone, as it would read as the line's explanation; a buff
+  // named after a term has the term's reminder as its text (see pairLines).
+  function findNamesInLine(text) {
     const parts = [];
-    if (nameRx) {
-      nameRx.lastIndex = 0;
-      const seen = new Set();
-      for (const m of text.matchAll(nameRx)) {
-        const n = m[1];
-        if (seen.has(n)) continue;
-        seen.add(n);
-        const skip = (CONFIG.nameScan.skipIf[LANG] || {})[n];
-        if (skip && new RegExp(skip).test(text)) continue;
-        const kind = nameKinds[n];
-        const e = kind.k || nameEntry(kind.s);
-        if (e) parts.push(e);
-      }
+    const shown = new Set();   // skill ids and entries already in the popup
+    const put = (key, e) => {
+      if (!e || shown.has(key)) return;
+      shown.add(key);
+      parts.push(e);
+    };
+    for (const n of findNames(text)) {
+      const kind = nameKinds[n];
+      if (kind.k) put(kind.k, kind.k);
+      else put(kind.s, nameEntry(kind.s));
     }
-    for (const { rx, r } of reminderMatchers) {
+    for (const { rx, b, s, k } of pairMatchers) {
       if (!rx.test(text)) continue;
-      // the reminder can repeat the effects already shown ("(Avatar of Fire: 50% of Physical, ...)")
-      const flat = (s) => String(s).replace(/^\(\s*[A-Za-z][A-Za-z0-9 '\-]*:\s*/, '').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
-      const known = [].concat(...parts.map((p) => (p.l || []).concat(p.r || []))).map(flat).join('|');
-      const rest = r.filter((x) => { const f = flat(x); return f && !known.includes(f); });
-      if (rest.length) parts.push({ n: '', l: [], r: rest });
+      for (const id of s || []) put(id, nameEntry(id));
+      for (const n of k || []) {
+        const e = lineTable[n] || table[n];
+        if (e && !e.missing) put(e, e);
+      }
+      for (const key of b || []) put('buff:' + key, buffTable[key]);
       break;
     }
     if (!parts.length) return null;
@@ -990,7 +1681,10 @@
 
   function nameEntry(id) {
     const s = skillTable[id];
-    return s ? { n: s.n, d: s.d, l: s.s, r: [] } : null;
+    if (!s) return null;
+    const out = { n: s.n, e: s.e, d: s.d, l: s.s, r: [] };
+    SOURCE.set(out, ['skill', s.n]);
+    return out;
   }
 
   // ---------------------------------------------------------------------------
@@ -1008,11 +1702,27 @@
     .mpv-desc { color: ${C.reminder}; margin-bottom: 4px; }
     .mpv-rem { color: ${C.reminder}; font-size: ${CONFIG.fontSize - 1}px; margin-top: 4px; }
     .mpv-note { color: ${C.note}; font-size: ${CONFIG.fontSize - 1}px; margin-top: 6px; }
-    .mpv-sep { border-top: 1px solid ${C.border}; margin: 6px 0; }
+    .mpv-part + .mpv-part { border-top: 1px solid ${C.border}; margin-top: 6px; padding-top: 6px; }
+    .mpv-part + .mpv-part > :first-child { margin-top: 0; }
+    .mpv-popup.mpv-cols { grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); column-gap: ${CONFIG.popupColumnGap}px; }
+    .mpv-popup.mpv-cols .mpv-part.mpv-coltop { border-top: none; margin-top: 0; padding-top: 0; }
+    .mpv-popup.mpv-cols .mpv-part.mpv-right { border-left: 1px solid ${C.border}; padding-left: ${CONFIG.popupColumnGap}px; }
     .mpv-button { position: fixed; right: 12px; bottom: 12px; z-index: 2147483001; max-width: 360px;
       padding: 6px 12px; cursor: pointer; font-size: ${CONFIG.fontSize}px; text-align: left;
       color: ${C.buttonText}; background: ${C.buttonBackground}; border: 1px solid ${C.border}; border-radius: 4px; }
     .mpv-button[disabled] { cursor: default; }
+    .mpv-panel { position: fixed; right: 12px; bottom: ${CONFIG.historyPanel.bottom}px; z-index: 2147483001; display: none;
+      box-sizing: border-box; width: ${CONFIG.historyPanel.width}px; max-width: calc(100vw - 24px); padding: 10px 12px;
+      background: ${C.background}; border: 1px solid ${C.border}; border-radius: 4px; color: ${C.buttonText};
+      font-size: ${CONFIG.fontSize}px; line-height: 1.6; text-align: left; white-space: normal; }
+    .mpv-panel-title { color: ${C.name}; font-weight: bold; margin-bottom: 6px; }
+    .mpv-panel-list { max-height: ${CONFIG.historyPanel.listMaxHeight}vh; overflow-y: auto; }
+    .mpv-panel-head { color: ${C.name}; margin-top: 6px; }
+    .mpv-panel-head:first-child { margin-top: 0; }
+    .mpv-panel-head ~ .mpv-panel-item { padding-left: 10px; }
+    .mpv-panel-bar { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+    .mpv-panel-bar button { cursor: pointer; padding: 2px 10px; font-size: ${CONFIG.fontSize}px;
+      color: ${C.buttonText}; background: ${C.buttonBackground}; border: 1px solid ${C.border}; border-radius: 4px; }
   `;
   document.head.appendChild(style);
 
@@ -1042,30 +1752,181 @@
     return d;
   }
 
-  function fillPopup(entry) {
+  // The list of the names that an update no longer shows, and the update history (Tampermonkey menu)
+  const panel = document.createElement('div');
+  panel.className = 'mpv-panel';
+  document.body.appendChild(panel);
+  const two = (n) => String(n).padStart(2, '0');
+  const timeText = (t) => {
+    const d = new Date(t);
+    return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+  };
+  const historyHead = (h) => `${timeText(h.at)} ${T.pages[h.lang] || h.lang} ${h.game === 'poe2' ? 'POE2' : 'POE1'}`;
+  const itemText = ([kind, name]) => `${T.kinds[kind] || kind}: ${name}`;
+
+  // groups: [{ head (optional), items: [[kind, name]] }]
+  function showList(title, groups) {
+    panel.textContent = '';
+    panel.appendChild(el('mpv-panel-title', title));
+    const list = el('mpv-panel-list', '');
+    if (!groups.length) list.appendChild(el('mpv-panel-item', T.historyEmpty));
+    for (const g of groups) {
+      if (g.head) list.appendChild(el('mpv-panel-head', g.head));
+      for (const item of g.items) list.appendChild(el('mpv-panel-item', itemText(item)));
+    }
+    panel.appendChild(list);
+    const bar = el('mpv-panel-bar', '');
+    const add = (label, onClick) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.addEventListener('click', onClick);
+      bar.appendChild(b);
+    };
+    if (GM_getValue(KEY_HISTORY, []).length) add(T.historySave, () => { saveHistory(); panel.style.display = 'none'; });
+    add(T.historyClose, () => { panel.style.display = 'none'; });
+    panel.appendChild(bar);
+    panel.style.display = 'block';
+  }
+
+  function showHistory() {
+    showList(T.historyTitle, GM_getValue(KEY_HISTORY, []).map((h) => ({ head: historyHead(h), items: h.items })));
+  }
+
+  // the whole update history as a text file, into the browser's download folder
+  function saveHistory() {
+    const lines = [T.historyFileTitle, ''];
+    for (const h of GM_getValue(KEY_HISTORY, [])) {
+      lines.push(historyHead(h));
+      for (const item of h.items) lines.push('  ' + itemText(item));
+      lines.push('');
+    }
+    const url = URL.createObjectURL(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/plain;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = T.historyFile;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  // text: the line under the mouse
+  function fillPopup(entry, text) {
     popup.textContent = '';
     if (!entry) {
       popup.appendChild(el('mpv-note', T.noData));
       return;
     }
     if (entry.multi) {
-      // several names in one line: each one's effects, one under another
-      entry.multi.forEach((part, i) => {
-        if (i) popup.appendChild(el('mpv-sep', ''));
-        fillPart(part);
-      });
+      // several names in one line: each one's effects, one under another (or in two columns, see placePopup)
+      for (const part of entry.multi) {
+        const box = el('mpv-part', '');
+        fillPart(part, box, text);
+        popup.appendChild(box);
+      }
       return;
     }
-    fillPart(entry);
+    fillPart(entry, popup, text);
   }
 
-  function fillPart(entry) {
-    if (entry.n) popup.appendChild(el('mpv-name', entry.n));
-    if (entry.missing) popup.appendChild(el('mpv-note', entry.skillMissing ? T.skillNotFound : T.notFound));
-    for (const d of entry.d || []) popup.appendChild(el('mpv-desc', d));
-    for (const l of entry.l) popup.appendChild(el('mpv-line', l));
-    for (const r of unique(entry.r || [])) popup.appendChild(el('mpv-rem', r));   // also for data made before 1.0.1
-    if (entry.f && T.noJapanese) popup.appendChild(el('mpv-note', T.noJapanese));
+  // The name as the popup shows it. A name that the line does not write itself (the Japanese text of the game writes
+  // some names differently in the item lines and in the data: "レッサーブルータルシュラインのバフを持つ" and the buff
+  // "残忍なシュライン") also gets its English name, which the line's name usually comes from: "残忍なシュライン(Brutal
+  // Shrine)". A support gem's line writes its name without "サポート".
+  function partTitle(entry, text) {
+    const base = entry.b || entry.n;
+    if (!entry.e || !base || !text) return entry.n;
+    const squash = (s) => String(s).replace(/\s+/g, '');
+    const line = squash(text);
+    if (line.includes(squash(base)) || line.includes(squash(base.replace(/\s*(Support|サポート)$/i, '')))) return entry.n;
+    return entry.n.replace(base, () => T.withEnglish(base, entry.e));
+  }
+
+  function fillPart(entry, box, text) {
+    if (entry.n) box.appendChild(el('mpv-name', partTitle(entry, text)));
+    if (entry.missing) box.appendChild(el('mpv-note', entry.skillMissing ? T.skillNotFound : T.notFound));
+    for (const d of entry.d || []) box.appendChild(el('mpv-desc', d));
+    for (const l of entry.l) box.appendChild(el('mpv-line', l));
+    for (const r of unique(entry.r || [])) box.appendChild(el('mpv-rem', r));   // also for data made before 1.0.1
+    if (entry.f && T.noJapanese) box.appendChild(el('mpv-note', T.noJapanese));
+  }
+
+  // two columns: the first half of the parts on the left, the rest on the right, each read from the top
+  function setColumns(parts, on) {
+    const rows = Math.ceil(parts.length / 2);
+    popup.classList.toggle('mpv-cols', on);
+    popup.style.gridTemplateRows = on ? `repeat(${rows}, auto)` : '';
+    popup.style.display = on ? 'grid' : 'block';
+    parts.forEach((p, i) => {
+      p.classList.toggle('mpv-coltop', on && i % rows === 0);
+      p.classList.toggle('mpv-right', on && i >= rows);
+    });
+  }
+
+  // the left edge of the text of a line of the trade page (the line's box is as wide as the item)
+  function textLeft(row) {
+    const s = row.querySelector('[data-field]') || row.querySelector('.s') || row;
+    const range = document.createRange();
+    range.selectNodeContents(s);
+    const r = range.getBoundingClientRect();
+    return r.width || r.height ? r.left : s.getBoundingClientRect().left;
+  }
+
+  // The item's own lines: the lines next to the hovered one without a gap wider than CONFIG.itemLineGap px between
+  // them (the next item's name and properties make a wider gap). rows: [[row, its box]] in the page's order.
+  function itemRows(row, rows) {
+    const i = rows.findIndex(([r]) => r === row);
+    if (i < 0) return [];
+    let lo = i, hi = i;
+    while (lo > 0 && rows[lo][1].top - rows[lo - 1][1].bottom <= CONFIG.itemLineGap) lo--;
+    while (hi < rows.length - 1 && rows[hi + 1][1].top - rows[hi][1].bottom <= CONFIG.itemLineGap) hi++;
+    return rows.slice(lo, hi + 1);
+  }
+
+  // Left of the lines (see CONFIG.popupSideGap). First no line is covered, then (a tall popup reaches other items)
+  // only the hovered item's lines are kept free, then only the hovered line (a longer line of the item beside it is
+  // covered at its left end, not whole as below the line); first just below the hovered line, then just above it.
+  function placeBeside(row, rr, parts, vh, m) {
+    const rows = [...document.querySelectorAll(ROW_SELECTOR)].map((r) => [r, r.getBoundingClientRect()]).filter(([, b]) => b.height > 0);
+    const own = itemRows(row, rows);
+    for (const avoid of [rows, own, [[row, rr]]]) {
+      for (const below of [true, false]) if (fitBeside(row, rr, parts, vh, m, avoid, below)) return true;
+    }
+    return false;
+  }
+
+  // The popup's right edge just left of the text of the lines of avoid beside it; false where it does not fit.
+  function fitBeside(row, rr, parts, vh, m, avoid, below) {
+    const gap = CONFIG.popupSideGap;
+    let right = textLeft(row) - gap;
+    for (let tries = 0; tries < 4; tries++) {
+      const room = right - m;
+      if (room < CONFIG.popupSideMinWidth) return false;
+      setColumns(parts, false);
+      popup.style.maxWidth = Math.floor(Math.min(CONFIG.popupMaxWidth, room)) + 'px';
+      let pr = popup.getBoundingClientRect();
+      if (pr.height > vh - m * 2) {
+        // taller than the screen: two columns, each at least as wide as the narrowest popup
+        if (parts.length < 2 || room < CONFIG.popupSideMinWidth * 2 + CONFIG.popupColumnGap) return false;
+        setColumns(parts, true);
+        popup.style.maxWidth = Math.floor(Math.min(CONFIG.popupColumnsMaxWidth, room)) + 'px';
+        pr = popup.getBoundingClientRect();
+        if (pr.height > vh - m * 2) return false;
+      }
+      const want = below ? rr.bottom + CONFIG.popupGap : rr.top - CONFIG.popupGap - pr.height;
+      const top = Math.max(m, Math.min(want, vh - m - pr.height));
+      // a longer line beside the popup moves it further left
+      let edge = right;
+      for (const [r, b] of avoid) if (b.bottom > top && b.top < top + pr.height) edge = Math.min(edge, textLeft(r) - gap);
+      if (edge >= right) {
+        popup.style.left = Math.floor(right - pr.width) + 'px';
+        popup.style.top = Math.round(top) + 'px';
+        return true;
+      }
+      right = edge;
+    }
+    return false;
   }
 
   function placePopup(row) {
@@ -1073,11 +1934,21 @@
     const vw = document.documentElement.clientWidth;
     const vh = document.documentElement.clientHeight;
     const m = CONFIG.screenMargin;
-    popup.style.maxWidth = Math.min(CONFIG.popupMaxWidth, vw - m * 2) + 'px';
+    const parts = [...popup.children].filter((x) => x.classList.contains('mpv-part'));
     popup.style.left = '0px';
     popup.style.top = '0px';
-    popup.style.display = 'block';
-    const pr = popup.getBoundingClientRect();
+    if (placeBeside(row, rr, parts, vh, m)) return;
+    // not enough room left of the lines: just below the line, or just above it
+    setColumns(parts, false);
+    popup.style.maxWidth = Math.min(CONFIG.popupMaxWidth, vw - m * 2) + 'px';
+    let pr = popup.getBoundingClientRect();
+    // fits neither below nor above the line: two columns, so the popup does not cover the line
+    const fits = (h) => rr.bottom + CONFIG.popupGap + h <= vh - m || rr.top - CONFIG.popupGap - h >= m;
+    if (parts.length > 1 && !fits(pr.height)) {
+      setColumns(parts, true);
+      popup.style.maxWidth = Math.min(CONFIG.popupColumnsMaxWidth, vw - m * 2) + 'px';
+      pr = popup.getBoundingClientRect();
+    }
     let left = Math.min(Math.max(rr.left, m), vw - m - pr.width);
     let top = rr.bottom + CONFIG.popupGap;                     // normally just below the line
     if (top + pr.height > vh - m) {
@@ -1132,7 +2003,7 @@
         entry = lookup(rowText(row));
         if (entry === null) { hidePopup(); return; }
       }
-      fillPopup(entry);
+      fillPopup(entry, rowText(row));
       currentRow = row;
       placePopup(row);
     }, CONFIG.hoverDelayMs);
@@ -1277,9 +2148,11 @@
   loadCategories();
   if (OTHER_LANG) return;
   GM_registerMenuCommand(T.menuUpdate, updateData);
+  GM_registerMenuCommand(T.menuHistory, showHistory);
   loadTable();
   if (!(GAME === 'poe2' && LANG === 'ja')) dailyCheck();
 
   // for testing from the console of a test page
-  if (TEST) TEST.api = { updateData, dailyCheck, loadTable, lookup, convertPoe1, convertPoe2, translateStats, buildIndex, GAME, LANG };
+  if (TEST) TEST.api = { updateData, dailyCheck, loadTable, lookup, convertPoe1, convertPoe2, translateStats, buildIndex, GAME, LANG,
+    showHistory, saveHistory, partTitle, fillPopup, placePopup };
 })();

@@ -1,12 +1,14 @@
 Mouseover Detail Viewer
 ========================================
 
-Path of Exile の公式トレード画面で、アイテム特有の効果/効能で、ゲーム内特有の名前しか書かれていない物を、トレード画面の表示行にマウスカーソルを重ねると、その効果/効能を行のすぐ下に表示する Tool です。
+Path of Exile の公式トレード画面で、アイテム特有の効果/効能で、ゲーム内特有の名前しか書かれていない物を、トレード画面の表示行にマウスカーソルを重ねると、その効果/効能を表示する Tool です。
 又今表示されている詳細情報を知りたい時に POEDB/POE2DB に直接 Jump できるボタンを配置しました。
 POEDB などで調べ直す手間を軽減させます。
 
 この機能を動作させるために、別途ブラウザ用の拡張機能(Tampermonkey)を使用します。
 Mouseover Detail Viewer はその拡張機能の土台を利用して動作するスクリプトです。
+
+Path of Exile と Path of Exile 2 の、両方のトレード画面で使えます(POE2 は公式データの都合により正式リリース後に表示内容が増える予定です。特に日本語データは現状非常に少ない翻訳データとなっています)。
 
 (English follows below.)
 
@@ -20,8 +22,6 @@ Mouseover Detail Viewer はその拡張機能の土台を利用して動作す�
 ・「ソケットされたジェムはレベル20 投射物回帰サポートによってサポートされる」などの、サポートジェムと同じ効果の行(行に書かれたレベルの数値で表示します)
 ・「召喚したスケルトンはアバターオブファイヤーを持つ」「ヘラルドオブサンダーのマナリザーブ効率が20%増加する」などの、キーストーン名・スキル名が入った行(1つの行に名前が2つ以上ある時は、全部を並べて表示します)
 ・「ヒット時に敵を灰まみれにする」などの、ゲーム内で説明文が付く言葉(灰まみれ・挑発など)が入った行
-
-対応する画面: POE1 の日本語・英語画面、POE2 の英語画面(Chrome・Edge)。
 
 
 ■ DB ボタン
@@ -107,11 +107,13 @@ Mouseover Detail Viewer は、Grinding Gear Games とは関係ありません。
 English
 ========================================
 
-On the official Path of Exile trade site, some item effects are shown only by an in-game name. Hover such a line on the trade page, and its effects are shown right below the line.
+On the official Path of Exile trade site, some item effects are shown only by an in-game name. Hover such a line on the trade page, and its effects are shown.
 There is also a button that jumps straight to POEDB / POE2DB when you want to know more about what is shown.
 It saves you the trouble of looking things up on POEDB and similar sites.
 
 This tool needs a separate browser extension, Tampermonkey. Mouseover Detail Viewer is a script that runs on top of that extension.
+
+This can be used on both the Path of Exile and Path of Exile 2 trade sites (due to official data limitations, more is expected to be shown for POE2 after its official release. In particular, the Japanese data currently has very few translations).
 
 
 ■ What it shows
@@ -123,8 +125,6 @@ This tool needs a separate browser extension, Tampermonkey. Mouseover Detail Vie
 ・Support gem lines such as "Socketed Gems are Supported by Level 20 Returning Projectiles" (values for the level on the line)
 ・Lines that name a keystone or skill, such as "Summoned Skeletons have Avatar of Fire" or "Herald of Thunder has 20% increased Mana Reservation Efficiency" (all names in the line are shown)
 ・Lines with a game word that has a reminder in the game, such as "Cover Enemies in Ash"
-
-Supported: POE1 trade in Japanese and English, POE2 trade in English (Chrome, Edge).
 
 
 ■ DB button
